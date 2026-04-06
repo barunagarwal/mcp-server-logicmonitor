@@ -52,6 +52,13 @@
           "isSecret": true
         },
         {
+          "name": "LM_CREDENTIALS_JSON",
+          "description": "JSON credential payload containing bearer_token or access_id/access_key and optionally portal or portal_id",
+          "isRequired": false,
+          "format": "string",
+          "isSecret": true
+        },
+        {
           "name": "LM_ENABLED_TOOLS",
           "description": "Comma-separated tool names or glob patterns to enable (e.g., get_*,create_device)",
           "isRequired": false,

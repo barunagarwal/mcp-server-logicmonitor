@@ -332,6 +332,33 @@ The server exposes health endpoints for container orchestration:
 - `GET /healthz` - Liveness probe (200 OK or 503)
 - `GET /readyz` - Readiness probe (includes connectivity check if enabled)
 
+### Multi-Cloud Image Publishing
+
+This repo includes a Travis build path for publishing the container image to the same GCP/AWS registries used by Edwin-style deployments:
+
+- `eu.gcr.io/dexda-non-production/mcp-server-logicmonitor`
+- `eu.gcr.io/dexda-production/mcp-server-logicmonitor`
+- `560269851512.dkr.ecr.us-west-2.amazonaws.com/mcp-server-logicmonitor`
+
+Builds are gated by `AUTOBUILD` for non-tag branches. Configure Travis repository secrets for the registries you want to target:
+
+- `GCLOUD_SA_NON_PROD_JSON` - base64-encoded GCP service account JSON for `dexda-non-production`
+- `GCLOUD_SA_PROD_JSON` - base64-encoded GCP service account JSON for `dexda-production` (tag builds only)
+- `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY` - AWS credentials for ECR
+- `AWS_REGION` - defaults to `us-west-2`
+
+### Kubernetes Deployment (Feature Test)
+
+A feature-test manifest is included at `deploy/k8s/feature-test/mcp-server-logicmonitor.yaml`.
+It points to `eu.gcr.io/dexda-non-production/mcp-server-logicmonitor:main` and expects the
+existing `feature-test` secret `topology-feature-lmv1-token` with key `test-feature`.
+
+Apply it with:
+
+```bash
+kubectl apply -f deploy/k8s/feature-test/mcp-server-logicmonitor.yaml
+```
+
 ## Configuration
 
 ### Environment Variables
@@ -342,6 +369,7 @@ The server exposes health endpoints for container orchestration:
 | `LM_BEARER_TOKEN` | Yes* | - | API Bearer token (min 10 characters) |
 | `LM_ACCESS_ID` | No | - | LMv1 API access ID (for ingestion APIs) |
 | `LM_ACCESS_KEY` | No | - | LMv1 API access key (for ingestion APIs) |
+| `LM_CREDENTIALS_JSON` | No | - | JSON credential payload containing `access_id`/`access_key` or `bearer_token`, and optionally `portal` or `portal_id` |
 | `LM_ENABLE_WRITE_OPERATIONS` | No | `false` | Enable write operations (create, update, delete) |
 | `LM_API_VERSION` | No | `3` | API version |
 | `LM_TIMEOUT` | No | `30` | Request timeout in seconds (range: 5-300) |
@@ -376,6 +404,9 @@ The server exposes health endpoints for container orchestration:
 | `HF_CACHE_DIR` | No | - | HuggingFace model cache directory |
 
 *Either `LM_BEARER_TOKEN` or both `LM_ACCESS_ID` and `LM_ACCESS_KEY` are required.
+
+`LM_CREDENTIALS_JSON` is an alternative way to provide those credentials, which is useful
+when injecting a single Kubernetes secret value that already contains a JSON payload.
 
 ### Authentication Methods
 

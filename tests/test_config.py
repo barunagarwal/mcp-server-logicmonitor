@@ -48,6 +48,30 @@ class TestLMConfigBearer:
         with pytest.raises(ValueError, match="Authentication required"):
             LMConfig()
 
+    def test_credentials_json_populates_lmv1_fields(self, monkeypatch):
+        """LMv1 auth can be provided through LM_CREDENTIALS_JSON."""
+        monkeypatch.delenv("LM_PORTAL", raising=False)
+        monkeypatch.delenv("LM_ACCESS_ID", raising=False)
+        monkeypatch.delenv("LM_ACCESS_KEY", raising=False)
+        monkeypatch.setenv(
+            "LM_CREDENTIALS_JSON",
+            '{"access_id":"test_access_id","access_key":"test_access_key","portal_id":"qauat01"}',
+        )
+
+        config = LMConfig()
+
+        assert config.portal == "qauat01.logicmonitor.com"
+        assert config.access_id == "test_access_id"
+        assert config.access_key == "test_access_key"
+
+    def test_credentials_json_invalid_raises_error(self, monkeypatch):
+        """Invalid LM_CREDENTIALS_JSON raises a validation error."""
+        monkeypatch.delenv("LM_PORTAL", raising=False)
+        monkeypatch.setenv("LM_CREDENTIALS_JSON", "not-json")
+
+        with pytest.raises(ValueError, match="credentials_json must be valid JSON"):
+            LMConfig()
+
 
 class TestLMConfigPortalNormalization:
     """Tests for portal URL normalization."""

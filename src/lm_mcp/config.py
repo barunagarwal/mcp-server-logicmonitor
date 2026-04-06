@@ -1,8 +1,9 @@
 # Description: Configuration module for LogicMonitor MCP Server.
 # Description: Handles environment variable loading and validation for LM API credentials.
 
+import json
 import re
-from typing import Literal
+from typing import Any, Literal
 
 from pydantic import field_validator, model_validator
 from pydantic_settings import BaseSettings
@@ -42,6 +43,8 @@ class LMConfig(BaseSettings):
         LM_BEARER_TOKEN: API Bearer token for authentication (preferred)
         LM_ACCESS_ID: LMv1 access ID for HMAC authentication
         LM_ACCESS_KEY: LMv1 access key for HMAC authentication
+        LM_CREDENTIALS_JSON: JSON object containing bearer_token or
+            access_id/access_key and optionally portal or portal_id
         LM_API_VERSION: API version (default: 3)
         LM_TIMEOUT: Request timeout in seconds (default: 30, range: 5-300)
         LM_ENABLE_WRITE_OPERATIONS: Enable write operations (default: false)
@@ -68,6 +71,7 @@ class LMConfig(BaseSettings):
     bearer_token: str | None = None
     access_id: str | None = None
     access_key: str | None = None
+    credentials_json: str | None = None
     api_version: int = 3
     timeout: int = 30
     enable_write_operations: bool = False
@@ -102,6 +106,69 @@ class LMConfig(BaseSettings):
     model_config = {
         "env_prefix": "LM_",
     }
+
+    @staticmethod
+    def _portal_from_credentials(value: Any) -> str | None:
+        """Normalize portal identifiers from credential payloads.
+
+        LogicMonitor secret payloads sometimes store only the portal ID
+        (for example `qauat01`) instead of the full hostname.
+        """
+        if value is None:
+            return None
+
+        portal = str(value).strip()
+        if not portal:
+            return None
+        if "." not in portal:
+            return f"{portal}.logicmonitor.com"
+        return portal
+
+    @model_validator(mode="before")
+    @classmethod
+    def load_credentials_json(cls, data: Any) -> Any:
+        """Populate auth fields from LM_CREDENTIALS_JSON when provided."""
+        if not isinstance(data, dict):
+            return data
+
+        raw = data.get("credentials_json")
+        if not raw:
+            return data
+
+        try:
+            payload = json.loads(raw)
+        except json.JSONDecodeError as exc:
+            raise ValueError("credentials_json must be valid JSON") from exc
+
+        if not isinstance(payload, dict):
+            raise ValueError("credentials_json must be a JSON object")
+
+        if not data.get("bearer_token"):
+            bearer_token = payload.get("bearer_token") or payload.get("token")
+            if bearer_token:
+                data["bearer_token"] = str(bearer_token)
+
+        if not data.get("access_id"):
+            access_id = payload.get("access_id") or payload.get("accessId")
+            if access_id:
+                data["access_id"] = str(access_id)
+
+        if not data.get("access_key"):
+            access_key = payload.get("access_key") or payload.get("accessKey")
+            if access_key:
+                data["access_key"] = str(access_key)
+
+        if not data.get("portal"):
+            portal = (
+                payload.get("portal")
+                or payload.get("portal_id")
+                or payload.get("portalId")
+            )
+            normalized = cls._portal_from_credentials(portal)
+            if normalized:
+                data["portal"] = normalized
+
+        return data
 
     @field_validator("portal", mode="before")
     @classmethod

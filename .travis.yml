@@ -1,0 +1,30 @@
+language: python
+python:
+  - "3.12"
+dist: jammy
+
+env:
+  global:
+    - AWS_REGION=us-west-2
+
+services:
+  - docker
+
+before_install:
+  - pip install --upgrade pip
+  - pip install uv awscli
+
+install:
+  - uv sync --dev
+
+script:
+  - uv run ruff check src tests
+  - uv run ruff format --check src tests
+  - uv run pytest tests/ -v --tb=short
+
+deploy:
+  - provider: script
+    skip_cleanup: true
+    script: ./scripts/travis_docker_build.sh
+    on:
+      all_branches: true

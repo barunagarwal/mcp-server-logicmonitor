@@ -1,0 +1,10 @@
+# AUTOBUILD - Controls which branches trigger Travis image builds
+#
+# Format:
+#   branch-name                              Build the image for that branch
+#   branch-name:image1,image2                Build only the named images
+#
+# Available images:
+#   mcp-server-logicmonitor
+
+main
