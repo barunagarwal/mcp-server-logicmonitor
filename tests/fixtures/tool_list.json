@@ -6875,6 +6875,159 @@
       "type": "object"
     }
   },
+  "get_usage_actuals": {
+    "annotations": {
+      "destructiveHint": false,
+      "idempotentHint": true,
+      "openWorldHint": true,
+      "readOnlyHint": true,
+      "title": null
+    },
+    "description": "Get month-to-date consumption for one feature from /usage/focusCostUsage. Handles the stitched paging, drops today's partial row and the forward-padded zeros, and converts LOGS from bytes",
+    "inputSchema": {
+      "properties": {
+        "basis": {
+          "description": "Roll-up basis from get_usage_contract (RAVG, DSUM, SUM). Without it only the daily series is returned",
+          "type": "string"
+        },
+        "days": {
+          "default": 30,
+          "description": "Days back from today when month_to_date is false; ~1 API call per 2 days",
+          "type": "integer"
+        },
+        "feature": {
+          "description": "Contract feature name, e.g. HYBRID_UNITS",
+          "type": "string"
+        },
+        "month_to_date": {
+          "default": true,
+          "description": "Cover the calendar month to date, the window LogicMonitor bills on and resets on the 1st. Set false to use `days` back from today instead",
+          "type": "boolean"
+        },
+        "tenant_ids": {
+          "description": "system.tenant.identifier values. Each tenant gets its own line rolled up on basis; an unknown id reads zero rather than failing",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "feature"
+      ],
+      "type": "object"
+    }
+  },
+  "get_usage_by_tenant": {
+    "annotations": {
+      "destructiveHint": false,
+      "idempotentHint": true,
+      "openWorldHint": true,
+      "readOnlyHint": true,
+      "title": null
+    },
+    "description": "LogicMonitor's billed usage split by tenant (system.tenant.identifier) for one or more features, each on its contract basis, with the untenanted remainder. Tenants are discovered when not given",
+    "inputSchema": {
+      "properties": {
+        "days": {
+          "default": 30,
+          "description": "Days back when month_to_date is false",
+          "type": "integer"
+        },
+        "features": {
+          "description": "Feature names; defaults to every billable line. Roughly (1 + tenants/40) x 15 API calls per feature month to date",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "month_to_date": {
+          "default": true,
+          "description": "Cover the calendar month to date, the window LogicMonitor bills on. Set false to use `days` back from today instead",
+          "type": "boolean"
+        },
+        "tenant_ids": {
+          "description": "system.tenant.identifier values; discovered from resource groups, then resources, when omitted",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "tenant_property": {
+          "default": "system.tenant.identifier",
+          "description": "Property holding the tenant id, used for discovery",
+          "type": "string"
+        }
+      },
+      "type": "object"
+    }
+  },
+  "get_usage_contract": {
+    "annotations": {
+      "destructiveHint": false,
+      "idempotentHint": true,
+      "openWorldHint": true,
+      "readOnlyHint": true,
+      "title": null
+    },
+    "description": "Get contracted entitlements from /usage/contractInfo. Returns every feature including ones with no entitlement (LITE_RESOURCES, SAAS, DYNAMIC_SERVICE_INSIGHTS), which the usage page hides",
+    "inputSchema": {
+      "properties": {
+        "billable_only": {
+          "default": false,
+          "description": "Return only metered, paid, non-zero lines",
+          "type": "boolean"
+        }
+      },
+      "type": "object"
+    }
+  },
+  "get_usage_metrics": {
+    "annotations": {
+      "destructiveHint": false,
+      "idempotentHint": true,
+      "openWorldHint": true,
+      "readOnlyHint": true,
+      "title": null
+    },
+    "description": "Get portal-wide instantaneous usage counts from /metrics/usage. A point-in-time count, not a billing figure",
+    "inputSchema": {
+      "properties": {},
+      "type": "object"
+    }
+  },
+  "get_usage_reconciliation": {
+    "annotations": {
+      "destructiveHint": false,
+      "idempotentHint": true,
+      "openWorldHint": true,
+      "readOnlyHint": true,
+      "title": null
+    },
+    "description": "Reconcile entitlements against consumption for every billable line, each on its own aggregation basis, with sub-allocations surfaced",
+    "inputSchema": {
+      "properties": {
+        "days": {
+          "default": 30,
+          "description": "Days back when month_to_date is false",
+          "type": "integer"
+        },
+        "features": {
+          "description": "Restrict to these features; defaults to every billable line, which is ~15 API calls each",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "month_to_date": {
+          "default": true,
+          "description": "Cover the calendar month to date, the window LogicMonitor bills on and resets on the 1st. Set false to use `days` back from today instead",
+          "type": "boolean"
+        }
+      },
+      "type": "object"
+    }
+  },
   "get_user": {
     "annotations": {
       "destructiveHint": false,

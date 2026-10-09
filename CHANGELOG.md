@@ -9,6 +9,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Usage and entitlement tools (read-only), each verified against live `/usage/*` responses:
+  - `get_usage_contract`: contracted entitlements from `/usage/contractInfo`, including
+    features with no entitlement that the usage page hides. Multi-unit quantities are paired
+    with their units, and restated parent pools are detected.
+  - `get_usage_actuals`: month-to-date consumption for one feature from
+    `/usage/focusCostUsage`, handling the stitched paging, today's partial row, forward-padded
+    zeros, the required `endTime`, and LOGS reported in bytes against a GB contract.
+  - `get_usage_reconciliation`: entitlement against consumption for every billable line, each
+    on its contract roll-up basis (`RAVG`, `DSUM`, `SUM`), with sub-allocations surfaced.
+  - `get_usage_by_tenant`: billed usage split by `system.tenant.identifier`, with the
+    untenanted remainder labelled and no Overall double count.
+  - `get_usage_metrics`: point-in-time counts from `/metrics/usage` (not a billing figure).
+
+### Added
+
 - `LM_HTTP_AUTH_TOKEN`: opt-in inbound bearer authentication for the HTTP
   transport. When set, `/mcp` and `/api/v1/*` require
   `Authorization: Bearer <token>` (constant-time comparison) and return 401

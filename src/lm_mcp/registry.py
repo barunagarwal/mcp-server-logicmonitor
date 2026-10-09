@@ -3404,6 +3404,175 @@ TOOLS.extend(
     ]
 )
 
+# Usage / Entitlements
+TOOLS.extend(
+    [
+        Tool(
+            name="get_usage_contract",
+            description=(
+                "Get contracted entitlements from /usage/contractInfo. Returns every "
+                "feature including ones with no entitlement (LITE_RESOURCES, SAAS, "
+                "DYNAMIC_SERVICE_INSIGHTS), which the usage page hides"
+            ),
+            annotations=_READ_ONLY,
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "billable_only": {
+                        "type": "boolean",
+                        "default": False,
+                        "description": "Return only metered, paid, non-zero lines",
+                    },
+                },
+            },
+        ),
+        Tool(
+            name="get_usage_actuals",
+            description=(
+                "Get month-to-date consumption for one feature from "
+                "/usage/focusCostUsage. Handles the stitched paging, drops today's "
+                "partial row and the forward-padded zeros, and converts LOGS from bytes"
+            ),
+            annotations=_READ_ONLY,
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "feature": {
+                        "type": "string",
+                        "description": "Contract feature name, e.g. HYBRID_UNITS",
+                    },
+                    "days": {
+                        "type": "integer",
+                        "default": 30,
+                        "description": (
+                            "Days back from today when month_to_date is false; "
+                            "~1 API call per 2 days"
+                        ),
+                    },
+                    "basis": {
+                        "type": "string",
+                        "description": (
+                            "Roll-up basis from get_usage_contract (RAVG, DSUM, SUM). "
+                            "Without it only the daily series is returned"
+                        ),
+                    },
+                    "tenant_ids": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": (
+                            "system.tenant.identifier values. Each tenant gets its own "
+                            "line rolled up on basis; an unknown id reads zero rather "
+                            "than failing"
+                        ),
+                    },
+                    "month_to_date": {
+                        "type": "boolean",
+                        "default": True,
+                        "description": (
+                            "Cover the calendar month to date, the window LogicMonitor "
+                            "bills on and resets on the 1st. Set false to use `days` "
+                            "back from today instead"
+                        ),
+                    },
+                },
+                "required": ["feature"],
+            },
+        ),
+        Tool(
+            name="get_usage_by_tenant",
+            description=(
+                "LogicMonitor's billed usage split by tenant (system.tenant.identifier) "
+                "for one or more features, each on its contract basis, with the "
+                "untenanted remainder. Tenants are discovered when not given"
+            ),
+            annotations=_READ_ONLY,
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "features": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": (
+                            "Feature names; defaults to every billable line. Roughly "
+                            "(1 + tenants/40) x 15 API calls per feature month to date"
+                        ),
+                    },
+                    "tenant_ids": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": (
+                            "system.tenant.identifier values; discovered from resource "
+                            "groups, then resources, when omitted"
+                        ),
+                    },
+                    "tenant_property": {
+                        "type": "string",
+                        "default": "system.tenant.identifier",
+                        "description": "Property holding the tenant id, used for discovery",
+                    },
+                    "days": {
+                        "type": "integer",
+                        "default": 30,
+                        "description": "Days back when month_to_date is false",
+                    },
+                    "month_to_date": {
+                        "type": "boolean",
+                        "default": True,
+                        "description": (
+                            "Cover the calendar month to date, the window LogicMonitor "
+                            "bills on. Set false to use `days` back from today instead"
+                        ),
+                    },
+                },
+            },
+        ),
+        Tool(
+            name="get_usage_reconciliation",
+            description=(
+                "Reconcile entitlements against consumption for every billable line, "
+                "each on its own aggregation basis, with sub-allocations surfaced"
+            ),
+            annotations=_READ_ONLY,
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "days": {
+                        "type": "integer",
+                        "default": 30,
+                        "description": "Days back when month_to_date is false",
+                    },
+                    "features": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": (
+                            "Restrict to these features; defaults to every billable "
+                            "line, which is ~15 API calls each"
+                        ),
+                    },
+                    "month_to_date": {
+                        "type": "boolean",
+                        "default": True,
+                        "description": (
+                            "Cover the calendar month to date, the window LogicMonitor "
+                            "bills on and resets on the 1st. Set false to use `days` "
+                            "back from today instead"
+                        ),
+                    },
+                },
+            },
+        ),
+        Tool(
+            name="get_usage_metrics",
+            description=(
+                "Get portal-wide instantaneous usage counts from /metrics/usage. "
+                "A point-in-time count, not a billing figure"
+            ),
+            annotations=_READ_ONLY,
+            inputSchema={"type": "object", "properties": {}},
+        ),
+    ]
+)
+
 # Cost/Cloud
 TOOLS.extend(
     [
@@ -7498,6 +7667,7 @@ def get_tool_handler(tool_name: str) -> Any:
         topology_analysis,
         topologysources,
         traces,
+        usage,
         users,
         watsonx,
         websites,
@@ -7752,6 +7922,12 @@ def get_tool_handler(tool_name: str) -> Any:
         "get_device_batchjobs": batchjobs.get_device_batchjobs,
         "get_scheduled_downtime_jobs": batchjobs.get_scheduled_downtime_jobs,
         # Cost
+        # Usage / Entitlements
+        "get_usage_contract": usage.get_usage_contract,
+        "get_usage_actuals": usage.get_usage_actuals,
+        "get_usage_reconciliation": usage.get_usage_reconciliation,
+        "get_usage_by_tenant": usage.get_usage_by_tenant,
+        "get_usage_metrics": usage.get_usage_metrics,
         "get_cost_recommendations": cost.get_cost_recommendations,
         "get_idle_resources": cost.get_idle_resources,
         "get_cost_recommendation_categories": cost.get_cost_recommendation_categories,

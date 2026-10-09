@@ -2,7 +2,7 @@
 
 <!-- GENERATED FILE. Do not edit by hand. Regenerate: uv run python tests/test_tools_doc.py -->
 
-Reference for all 306 tools the LogicMonitor MCP server can advertise (core plus the optional Ansible Automation Platform, Terraform, and IBM watsonx.ai integrations). The **Write** column shows whether a tool requires `LM_ENABLE_WRITE_OPERATIONS=true`.
+Reference for all 311 tools the LogicMonitor MCP server can advertise (core plus the optional Ansible Automation Platform, Terraform, and IBM watsonx.ai integrations). The **Write** column shows whether a tool requires `LM_ENABLE_WRITE_OPERATIONS=true`.
 
 This file is generated from the tool registry (`src/lm_mcp/registry.py`) and the domain index (`lm://guide/tool-categories`), and kept in sync by `tests/test_tools_doc.py`. At runtime, discover tools with the `search_tools` tool.
 
@@ -283,6 +283,18 @@ Cloud cost analysis and optimization
 | `get_idle_resources` | Get idle/underutilized cloud resources (resolved from idle-type cost recommendation categories) | No |
 | `get_cost_recommendation_categories` | Get cost recommendation categories with counts and savings | No |
 | `get_cost_recommendation` | Get a specific cost recommendation by ID (v224 API) | No |
+
+## Usage
+
+Contracted entitlements and metered consumption
+
+| Tool | Description | Write |
+|------|-------------|-------|
+| `get_usage_contract` | Get contracted entitlements from /usage/contractInfo. Returns every feature including ones with no entitlement (LITE_RESOURCES, SAAS, DYNAMIC_SERVICE_INSIGHTS), which the usage page hides | No |
+| `get_usage_actuals` | Get month-to-date consumption for one feature from /usage/focusCostUsage. Handles the stitched paging, drops today's partial row and the forward-padded zeros, and converts LOGS from bytes | No |
+| `get_usage_reconciliation` | Reconcile entitlements against consumption for every billable line, each on its own aggregation basis, with sub-allocations surfaced | No |
+| `get_usage_by_tenant` | LogicMonitor's billed usage split by tenant (system.tenant.identifier) for one or more features, each on its contract basis, with the untenanted remainder. Tenants are discovered when not given | No |
+| `get_usage_metrics` | Get portal-wide instantaneous usage counts from /metrics/usage. A point-in-time count, not a billing figure | No |
 
 ## LogicModules
 

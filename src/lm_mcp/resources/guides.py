@@ -253,6 +253,16 @@ TOOL_CATEGORIES = {
                 "get_cost_recommendation",
             ],
         },
+        "usage": {
+            "description": "Contracted entitlements and metered consumption",
+            "tools": [
+                "get_usage_contract",
+                "get_usage_actuals",
+                "get_usage_reconciliation",
+                "get_usage_by_tenant",
+                "get_usage_metrics",
+            ],
+        },
         "logimodules": {
             "description": "LogicModule definitions (ConfigSource, EventSource, etc.)",
             "tools": [
