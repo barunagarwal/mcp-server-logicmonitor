@@ -7,6 +7,51 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- `get_audit_logs`: `start_time`/`end_time` filtered `happenedOnLocal`, which the API
+  ignores, so every call returned the newest rows. They now filter `happenedOn` (epoch).
+- `get_audit_logs`: `action` was sent as `happenedOn:"<action>"` (a timestamp field) and
+  silently ignored. It is now a description contains-match (e.g. `Action=Delete`,
+  `signs in`). When both `action` and `resource_type` are given, the second is applied
+  after the fetch (the API honours one description clause).
+- `get_audit_logs`: `has_more` was always false because the API returns a negative
+  `total` when more rows exist; now handled, plus `next_offset`.
+- `get_login_audit`: queried `happenedOn:"login"` and classified by "fail" anywhere in the
+  text, so Active Discovery rows quoting a database "Login failed for user" were reported
+  as failed portal logins. It now runs one description query per real login wording
+  (SAML sign-in, local 2FA-mode login, lmsupport, could-not-log-into, SSO timeout,
+  sign-out), merges them, and returns `status` and `method`.
+- `get_change_audit`: `change_type` was sent as `happenedOn:"<type>"`; the type is now read
+  from the description (`"Action=..."` or the leading verb) and filtered after the fetch.
+  System actors are excluded by default (`exclude_system`), since Active Discovery and
+  dynamic group membership otherwise fill every page.
+- `get_api_token_audit`: filtered on a non-existent `apiTokenId` field and kept any row
+  containing "api". It now matches `description~"API token <accessId>"` (resolving
+  `token_id` through `/setting/admins/apitokens`, or taking `access_id` directly) and
+  reports `kind` (change via token / rejected / throttled), `path`, `method`, `attempts`.
+- `get_api_tokens` / `get_api_token`: the handlers required `admin_id`, which the tool
+  schemas never exposed, so every call failed. `admin_id` is now optional: omitted, tokens
+  are listed across the portal (`/setting/admins/apitokens`) or looked up by id. Output
+  gains `access_id` and `type`.
+- Audit queries refuse `offset + limit > 10000` (HTTP 413) and filters over ~900 characters
+  (HTTP 500 above ~1,000) with a clear message instead of an API error.
+
+### Added
+
+- `get_audit_logs`: `username` accepts a comma-separated list (sent as
+  `username:"a"|"b"`); `exclude_system` drops System:* and automation actors after the
+  fetch (the API has no working negative filter); response includes the `filter` sent.
+- `get_login_audit`, `get_change_audit`, `get_api_token_audit`: `start_time`/`end_time`;
+  `get_change_audit`: `username`; `get_api_token_audit`: `access_id`.
+
+### Documentation
+
+- `AUDIT_SCHEMA` rewritten from live verification: `happenedOn` is the epoch timestamp,
+  `happenedOnLocal` is display-only, `username` is exact-match with `|` OR lists, negative
+  operators (`!:`, `!~`) fail silently, `description~` takes no OR list, filter length and
+  offset ceilings.
+
 ### Added
 
 - `LM_HTTP_AUTH_TOKEN`: opt-in inbound bearer authentication for the HTTP

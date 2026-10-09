@@ -132,6 +132,54 @@ class TestApiTokens:
         data = json.loads(result[0].text)
         assert data["note"] == "CI/CD token"
 
+    @respx.mock
+    async def test_get_api_tokens_without_admin_lists_all(self, client):
+        """Omitting admin_id lists every token (the registry never exposed admin_id)."""
+        from lm_mcp.tools.api_tokens import get_api_tokens
+
+        respx.get("https://test.logicmonitor.com/santaba/rest/setting/admins/apitokens").mock(
+            return_value=httpx.Response(
+                200,
+                json={
+                    "items": [
+                        {
+                            "id": 7,
+                            "accessId": "AbCdEfGhIjKlMnOpQrSt",
+                            "adminId": 3,
+                            "status": 2,
+                            "type": "LMv1",
+                        }
+                    ],
+                    "total": 1,
+                },
+            )
+        )
+        data = json.loads((await get_api_tokens(client))[0].text)
+        assert data["api_tokens"][0]["access_id"] == "AbCdEfGhIjKlMnOpQrSt"
+        assert data["api_tokens"][0]["type"] == "LMv1"
+
+    @respx.mock
+    async def test_get_api_token_without_admin_looks_up(self, client):
+        from lm_mcp.tools.api_tokens import get_api_token
+
+        respx.get("https://test.logicmonitor.com/santaba/rest/setting/admins/apitokens").mock(
+            return_value=httpx.Response(
+                200, json={"items": [{"id": 7, "accessId": "AbCdEfGhIjKlMnOpQrSt", "adminId": 3}]}
+            )
+        )
+        data = json.loads((await get_api_token(client, token_id=7))[0].text)
+        assert data["admin_id"] == 3
+
+    @respx.mock
+    async def test_get_api_token_without_admin_not_found(self, client):
+        from lm_mcp.tools.api_tokens import get_api_token
+
+        respx.get("https://test.logicmonitor.com/santaba/rest/setting/admins/apitokens").mock(
+            return_value=httpx.Response(200, json={"items": []})
+        )
+        text = (await get_api_token(client, token_id=99))[0].text
+        assert "not found" in text
+
 
 class TestAccessGroups:
     @respx.mock
