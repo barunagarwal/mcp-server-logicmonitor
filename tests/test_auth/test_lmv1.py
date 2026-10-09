@@ -8,6 +8,14 @@ from unittest.mock import patch
 
 import pytest
 
+# Independently computed with LogicMonitor's documented LMv1 recipe:
+# base64(hex(HMAC-SHA256("secret_key_456", "GET" + "1609459200000" + "" + "/device/devices")))
+REFERENCE_AUTH_HEADER = (
+    "LMv1 abc123:"
+    "ZWY4MDZjZjlmYjRlNzQwMTBhZjUzZTRkNGVmYWZjNWJmYmQwN2MyNWRiMjJiZDZlM2QzMGQ0ZTFkOGZmYzMwZg=="
+    ":1609459200000"
+)
+
 
 class TestLMv1Auth:
     """Tests for LMv1Auth provider."""
@@ -154,7 +162,9 @@ class TestLMv1Auth:
 
         # Should not raise if valid base64
         decoded = base64.b64decode(signature)
-        assert len(decoded) == 32  # SHA256 produces 32 bytes
+        # LM signs the hex digest: 64 lowercase hex chars for SHA256
+        assert len(decoded) == 64
+        assert all(c in b"0123456789abcdef" for c in decoded)
 
     def test_signature_calculation_matches_expected(self):
         """Signature matches expected HMAC-SHA256 calculation."""
@@ -179,11 +189,22 @@ class TestLMv1Auth:
             access_key.encode("utf-8"),
             sig_string.encode("utf-8"),
             hashlib.sha256,
-        ).digest()
-        expected_signature = base64.b64encode(expected_hmac).decode("utf-8")
+        ).hexdigest()
+        expected_signature = base64.b64encode(expected_hmac.encode("utf-8")).decode("utf-8")
 
         actual_signature = headers["Authorization"].split(":")[1]
         assert actual_signature == expected_signature
+
+    def test_signature_matches_logicmonitor_reference_vector(self):
+        """Signature equals a value computed independently with LM's documented recipe."""
+        from lm_mcp.auth.lmv1 import LMv1Auth
+
+        auth = LMv1Auth("abc123", "secret_key_456")
+        with patch("time.time", return_value=1609459200.0):
+            headers = auth.get_auth_headers("GET", "/device/devices", "")
+
+        # base64(hex(HMAC-SHA256(key, "GET1609459200000/device/devices")))
+        assert headers["Authorization"] == REFERENCE_AUTH_HEADER
 
     def test_signature_with_body(self):
         """Signature correctly includes body in calculation."""
@@ -207,8 +228,8 @@ class TestLMv1Auth:
             access_key.encode("utf-8"),
             sig_string.encode("utf-8"),
             hashlib.sha256,
-        ).digest()
-        expected_signature = base64.b64encode(expected_hmac).decode("utf-8")
+        ).hexdigest()
+        expected_signature = base64.b64encode(expected_hmac.encode("utf-8")).decode("utf-8")
 
         actual_signature = headers["Authorization"].split(":")[1]
         assert actual_signature == expected_signature

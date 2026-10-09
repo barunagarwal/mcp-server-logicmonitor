@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- LMv1 authentication: the signature is now base64 of the **hex** HMAC-SHA256 digest, as
+  LogicMonitor documents. Base64 of the raw 32-byte digest is rejected with 401, so every
+  portal configured with `LM_ACCESS_ID`/`LM_ACCESS_KEY` failed to authenticate; bearer-token
+  portals were unaffected. The tests now check a fixed reference vector computed with LM's
+  recipe.
+
 ### Added
 
 - `LM_HTTP_AUTH_TOKEN`: opt-in inbound bearer authentication for the HTTP

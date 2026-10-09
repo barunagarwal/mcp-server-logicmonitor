@@ -20,7 +20,7 @@ class LMv1Auth(AuthProvider):
         HMAC-SHA256(access_key, method + timestamp + body + resource_path)
 
     The Authorization header format is:
-        LMv1 access_id:base64(signature):timestamp
+        LMv1 access_id:base64(hex(signature)):timestamp
     """
 
     def __init__(self, access_id: str | None, access_key: str | None):
@@ -78,14 +78,16 @@ class LMv1Auth(AuthProvider):
             timestamp_ms: Timestamp in milliseconds.
 
         Returns:
-            Base64-encoded HMAC-SHA256 signature.
+            Base64-encoded hex HMAC-SHA256 signature.
         """
         signature_string = f"{method}{timestamp_ms}{body}{resource_path}"
 
-        hmac_digest = hmac.new(
+        # LogicMonitor expects base64 of the HEX digest (not of the raw 32 bytes).
+        # Signing the raw digest is rejected with 401 on every REST endpoint.
+        hex_digest = hmac.new(
             self.access_key.encode("utf-8"),
             signature_string.encode("utf-8"),
             hashlib.sha256,
-        ).digest()
+        ).hexdigest()
 
-        return base64.b64encode(hmac_digest).decode("utf-8")
+        return base64.b64encode(hex_digest.encode("utf-8")).decode("utf-8")
