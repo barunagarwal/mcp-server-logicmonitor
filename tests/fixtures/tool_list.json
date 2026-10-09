@@ -3558,9 +3558,21 @@
     "description": "Get API token usage audit logs",
     "inputSchema": {
       "properties": {
+        "access_id": {
+          "description": "Filter by API token access ID (overrides token_id)",
+          "type": "string"
+        },
+        "end_time": {
+          "description": "End time in epoch seconds (optional)",
+          "type": "integer"
+        },
         "limit": {
           "default": 50,
           "description": "Max results",
+          "type": "integer"
+        },
+        "start_time": {
+          "description": "Start time in epoch seconds (optional)",
           "type": "integer"
         },
         "token_id": {
@@ -3607,12 +3619,17 @@
     "inputSchema": {
       "properties": {
         "action": {
-          "description": "Filter by action type",
+          "description": "Text the description must contain (e.g. Action=Delete)",
           "type": "string"
         },
         "end_time": {
           "description": "End time in epoch seconds (optional)",
           "type": "integer"
+        },
+        "exclude_system": {
+          "default": false,
+          "description": "Drop System:* and automation actors after the fetch; ignored when a username is given",
+          "type": "boolean"
         },
         "limit": {
           "default": 50,
@@ -3621,11 +3638,11 @@
         },
         "offset": {
           "default": 0,
-          "description": "Pagination offset",
+          "description": "Pagination offset (offset + limit within 10000)",
           "type": "integer"
         },
         "resource_type": {
-          "description": "Filter by resource type",
+          "description": "Text the description must contain (e.g. dashboard)",
           "type": "string"
         },
         "start_time": {
@@ -3633,7 +3650,7 @@
           "type": "integer"
         },
         "username": {
-          "description": "Filter by username",
+          "description": "Exact username, or comma-separated usernames (OR)",
           "type": "string"
         }
       },
@@ -3694,8 +3711,17 @@
     "inputSchema": {
       "properties": {
         "change_type": {
-          "description": "Filter by change type",
+          "description": "create, update, delete or import",
           "type": "string"
+        },
+        "end_time": {
+          "description": "End time in epoch seconds (optional)",
+          "type": "integer"
+        },
+        "exclude_system": {
+          "default": true,
+          "description": "Drop System:* and automation actors; ignored when a username is given",
+          "type": "boolean"
         },
         "limit": {
           "default": 50,
@@ -3703,7 +3729,15 @@
           "type": "integer"
         },
         "resource_type": {
-          "description": "Filter by resource type",
+          "description": "Text the description must contain (e.g. dashboard)",
+          "type": "string"
+        },
+        "start_time": {
+          "description": "Start time in epoch seconds (optional)",
+          "type": "integer"
+        },
+        "username": {
+          "description": "Exact username, or comma-separated usernames (OR)",
           "type": "string"
         }
       },
@@ -5421,6 +5455,10 @@
     "description": "Get login/authentication audit logs",
     "inputSchema": {
       "properties": {
+        "end_time": {
+          "description": "End time in epoch seconds (optional)",
+          "type": "integer"
+        },
         "failed_only": {
           "default": false,
           "description": "Only failed logins",
@@ -5429,6 +5467,10 @@
         "limit": {
           "default": 50,
           "description": "Max results",
+          "type": "integer"
+        },
+        "start_time": {
+          "description": "Start time in epoch seconds (optional)",
           "type": "integer"
         },
         "success_only": {

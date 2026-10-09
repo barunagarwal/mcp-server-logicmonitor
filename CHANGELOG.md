@@ -7,6 +7,78 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- `get_audit_logs`: `start_time`/`end_time` filtered `happenedOnLocal`, which the API
+  ignores, so every call returned the newest rows. They now filter `happenedOn` (epoch).
+- `get_audit_logs`: `action` was sent as `happenedOn:"<action>"` (a timestamp field) and
+  silently ignored. It is now a description contains-match (e.g. `Action=Delete`,
+  `signs in`). When both `action` and `resource_type` are given, the second is applied
+  after the fetch, since the API honours one description clause.
+- `get_login_audit`: queried `happenedOn:"login"` and classified by "fail" anywhere in the
+  text, so Active Discovery rows quoting a database "Login failed for user" were reported
+  as failed portal logins. It now runs one description query per portal login wording
+  (SAML sign-in, local 2FA-mode login, lmsupport, could-not-log-into, SSO timeout,
+  sign-out), up to six calls, and merges them newest first.
+- `get_change_audit`: `change_type` was sent as `happenedOn:"<type>"`; the type is now read
+  from the description (`"Action=..."` or a leading verb) and matched after the fetch. Only
+  create, update, delete and import verbs count as changes, so Export, Login or
+  Acknowledge rows are not reported as updates. Any other `change_type` is refused rather
+  than returning no changes.
+- `get_api_token_audit`: filtered on a non-existent `apiTokenId` field and kept any row
+  containing "api". It now matches `description~"API token <accessId>"` and keeps only
+  rows naming exactly that access ID. `token_id` is resolved through
+  `/setting/admins/apitokens`, and a lookup that returns a different id, or no access ID,
+  is not found.
+- `get_api_token`: a portal-wide lookup that returns a different id is not found, rather
+  than that other token.
+- Audit queries refuse `offset + limit > 10000` (HTTP 413) and filters over ~900 characters
+  (HTTP 500 above ~1,000) with an `INVALID_REQUEST` message instead of an API error. Every
+  other failure, a malformed response body included, reaches `handle_error` and is logged.
+- An audit response without an integer `total` no longer reads as complete or fails: a
+  full page is reported as `has_more` with `total` as a lower bound.
+
+### Changed
+
+- The per-row `action` key, which held the `happenedOn` timestamp, is now `happened_on`
+  (`get_audit_logs`, `get_api_token_audit`, `get_change_audit`).
+- `get_change_audit` no longer returns `total`; it returns `scanned` (the rows read to find
+  the changes) and `has_more`. It reads a pool of 200 to 1,000 audit rows per call, and
+  excludes System:* and automation actors by default (`exclude_system`), since Active
+  Discovery and dynamic group membership otherwise fill every page.
+- `get_api_token_audit`'s `total` is the API's count of rows matching the description
+  filter, with `has_more`, where it was the number of rows returned. It takes no `offset`;
+  its note says to narrow `start_time`/`end_time` to reach older rows.
+- `get_audit_logs`' and `get_api_token_audit`'s `count` is the rows left after the checks
+  run after the fetch, so it can be lower than the page; `total` and `has_more` follow the
+  rows the API returned.
+- `get_login_audit` reports `status: "logout"` for sign-outs. When a wording has more rows
+  than were read, or the merge runs past `limit`, it reports `has_more` and a `total_note`
+  that `total` is a lower bound. `success_only` with `failed_only` is refused, where it
+  returned nothing.
+- The audit schema resource: `id` is a string; `happenedOn` is the epoch timestamp and
+  `happenedOnLocal` a display string that is not filterable; `username` takes `:` only.
+
+### Added
+
+- `get_audit_logs`: `username` accepts a comma-separated list (sent as
+  `username:"a"|"b"`), and `exclude_system` drops System:* and automation actors after the
+  fetch (the API has no working negative filter). The system-actor match is
+  case-sensitive and never matches a name with `@` or a space, and `exclude_system` never
+  drops a user the call names in `username`.
+- `get_login_audit`, `get_change_audit`, `get_api_token_audit`: `start_time`/`end_time`;
+  `get_change_audit`: `username`; `get_api_token_audit`: `access_id`.
+- Response fields: `filter` (the filter sent) on `get_audit_logs`, `get_change_audit` and
+  `get_api_token_audit`; `next_offset` on `get_audit_logs`; `note` and `total_note` where
+  they apply; `kind` (change via token / rejected / throttled), `access_id`, `path`,
+  `method`, `attempts`, `happened_on` and `session_id` on `get_api_token_audit` rows;
+  `method`, `happened_on` and `session_id` on `get_login_audit` rows; `change_type` and
+  `session_id` on `get_change_audit` rows; `access_id` and `type` on `get_api_tokens` /
+  `get_api_token`.
+- The audit schema resource documents the endpoint's live behaviour: `username` is
+  exact-match with `|` OR lists, negative operators (`!:`, `!~`) fail silently,
+  `description~` takes no OR list, and the filter length and offset ceilings.
+
 ## [4.2.1] - 2026-10-21
 
 ### Fixed

@@ -3223,11 +3223,17 @@ TOOLS.extend(
             inputSchema={
                 "type": "object",
                 "properties": {
-                    "username": {"type": "string", "description": "Filter by username"},
-                    "action": {"type": "string", "description": "Filter by action type"},
+                    "username": {
+                        "type": "string",
+                        "description": "Exact username, or comma-separated usernames (OR)",
+                    },
+                    "action": {
+                        "type": "string",
+                        "description": "Text the description must contain (e.g. Action=Delete)",
+                    },
                     "resource_type": {
                         "type": "string",
-                        "description": "Filter by resource type",
+                        "description": "Text the description must contain (e.g. dashboard)",
                     },
                     "start_time": {
                         "type": "integer",
@@ -3237,8 +3243,20 @@ TOOLS.extend(
                         "type": "integer",
                         "description": "End time in epoch seconds (optional)",
                     },
+                    "exclude_system": {
+                        "type": "boolean",
+                        "default": False,
+                        "description": (
+                            "Drop System:* and automation actors after the fetch; "
+                            "ignored when a username is given"
+                        ),
+                    },
                     "limit": {"type": "integer", "default": 50, "description": "Max results"},
-                    "offset": {"type": "integer", "default": 0, "description": "Pagination offset"},
+                    "offset": {
+                        "type": "integer",
+                        "default": 0,
+                        "description": "Pagination offset (offset + limit within 10000)",
+                    },
                 },
             },
         ),
@@ -3252,6 +3270,18 @@ TOOLS.extend(
                     "token_id": {
                         "type": "integer",
                         "description": "Filter by API token ID",
+                    },
+                    "access_id": {
+                        "type": "string",
+                        "description": "Filter by API token access ID (overrides token_id)",
+                    },
+                    "start_time": {
+                        "type": "integer",
+                        "description": "Start time in epoch seconds (optional)",
+                    },
+                    "end_time": {
+                        "type": "integer",
+                        "description": "End time in epoch seconds (optional)",
                     },
                     "limit": {"type": "integer", "default": 50, "description": "Max results"},
                 },
@@ -3275,6 +3305,14 @@ TOOLS.extend(
                         "default": False,
                         "description": "Only failed logins",
                     },
+                    "start_time": {
+                        "type": "integer",
+                        "description": "Start time in epoch seconds (optional)",
+                    },
+                    "end_time": {
+                        "type": "integer",
+                        "description": "End time in epoch seconds (optional)",
+                    },
                     "limit": {"type": "integer", "default": 50, "description": "Max results"},
                 },
             },
@@ -3286,8 +3324,33 @@ TOOLS.extend(
             inputSchema={
                 "type": "object",
                 "properties": {
-                    "resource_type": {"type": "string", "description": "Filter by resource type"},
-                    "change_type": {"type": "string", "description": "Filter by change type"},
+                    "resource_type": {
+                        "type": "string",
+                        "description": "Text the description must contain (e.g. dashboard)",
+                    },
+                    "change_type": {
+                        "type": "string",
+                        "description": "create, update, delete or import",
+                    },
+                    "username": {
+                        "type": "string",
+                        "description": "Exact username, or comma-separated usernames (OR)",
+                    },
+                    "start_time": {
+                        "type": "integer",
+                        "description": "Start time in epoch seconds (optional)",
+                    },
+                    "end_time": {
+                        "type": "integer",
+                        "description": "End time in epoch seconds (optional)",
+                    },
+                    "exclude_system": {
+                        "type": "boolean",
+                        "default": True,
+                        "description": (
+                            "Drop System:* and automation actors; ignored when a username is given"
+                        ),
+                    },
                     "limit": {"type": "integer", "default": 50, "description": "Max results"},
                 },
             },

@@ -14,6 +14,27 @@ if TYPE_CHECKING:
     from lm_mcp.client import LogicMonitorClient
 
 
+def _token(item: dict, role_ids: bool = False) -> dict:
+    """One API token as the tools return it; role_ids keeps each role's id with its name."""
+    roles = item.get("roles") or []
+    return {
+        "id": item.get("id"),
+        "access_id": item.get("accessId"),
+        "admin_id": item.get("adminId"),
+        "admin_name": item.get("adminName"),
+        "type": item.get("type"),
+        "note": item.get("note"),
+        "status": item.get("status"),
+        "created_on": item.get("createdOn"),
+        "last_used_on": item.get("lastUsedOn"),
+        "roles": (
+            [{"id": r.get("id"), "name": r.get("name")} for r in roles]
+            if role_ids
+            else [r.get("name") for r in roles]
+        ),
+    }
+
+
 async def get_api_tokens(
     client: LogicMonitorClient,
     admin_id: int | None = None,
@@ -39,20 +60,7 @@ async def get_api_tokens(
         )
         result = await client.get(path, params=params)
 
-        tokens = []
-        for item in result.get("items", []):
-            tokens.append(
-                {
-                    "id": item.get("id"),
-                    "admin_id": item.get("adminId"),
-                    "admin_name": item.get("adminName"),
-                    "note": item.get("note"),
-                    "status": item.get("status"),
-                    "created_on": item.get("createdOn"),
-                    "last_used_on": item.get("lastUsedOn"),
-                    "roles": [r.get("name") for r in item.get("roles", [])],
-                }
-            )
+        tokens = [_token(item) for item in result.get("items") or []]
 
         return format_response(
             {
@@ -88,21 +96,11 @@ async def get_api_token(
                 "/setting/admins/apitokens", params={"filter": f"id:{token_id}", "size": 1}
             )
             items = listing.get("items") or []
-            if not items:
+            # A filter the API does not apply returns other tokens, so the id must match.
+            if not items or items[0].get("id") != token_id:
                 raise NotFoundError(f"API token {token_id} not found")
             result = items[0]
 
-        token = {
-            "id": result.get("id"),
-            "admin_id": result.get("adminId"),
-            "admin_name": result.get("adminName"),
-            "note": result.get("note"),
-            "status": result.get("status"),
-            "created_on": result.get("createdOn"),
-            "last_used_on": result.get("lastUsedOn"),
-            "roles": [{"id": r.get("id"), "name": r.get("name")} for r in result.get("roles", [])],
-        }
-
-        return format_response(token)
+        return format_response(_token(result, role_ids=True))
     except Exception as e:
         return handle_error(e)

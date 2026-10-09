@@ -707,50 +707,56 @@ USER_SCHEMA = {
     },
 }
 
-# Audit log schema
+# Audit log schema — filter behaviour verified against live portals (see tools/audit.py)
 AUDIT_SCHEMA = {
     "name": "audit",
-    "description": "LogicMonitor audit log entry schema",
+    "description": (
+        "LogicMonitor audit log entry schema. Negative operators (!:, !~) are not supported on "
+        "this endpoint and fail silently; filters over ~1,000 characters return HTTP 500; "
+        "offset + size is capped at 10,000."
+    ),
     "api_endpoint": "/setting/accesslogs",
     "fields": {
         "id": {
-            "type": "integer",
+            "type": "string",
             "description": "Unique audit log entry ID",
             "filterable": True,
         },
         "username": {
             "type": "string",
-            "description": "Username who performed the action",
+            "description": (
+                "Actor. For a rejected API call this is the access ID the caller presented. "
+                'Exact match only; OR with username:"a"|"b". username~ returns nothing.'
+            ),
             "filterable": True,
-            "operators": [":", "~"],
+            "operators": [":"],
         },
         "ip": {
             "type": "string",
-            "description": "Source IP address",
+            "description": "Source IP address (a collector identity for System:ActiveDiscovery)",
             "filterable": True,
             "operators": [":", "~"],
         },
         "happenedOn": {
-            "type": "string",
-            "description": "Action type (login, create, update, delete, etc.)",
-            "filterable": True,
-            "operators": [":"],
-        },
-        "happenedOnLocal": {
             "type": "integer",
             "description": "Timestamp of the action (epoch seconds)",
             "filterable": True,
             "operators": [">", "<", ">:", "<:"],
         },
+        "happenedOnLocal": {
+            "type": "string",
+            "description": "Timestamp in the portal's time zone, for display (not filterable)",
+            "filterable": False,
+        },
         "description": {
             "type": "string",
-            "description": "Human-readable description of the action",
+            "description": "Human-readable description of the action (contains-match; no OR list)",
             "filterable": True,
             "operators": ["~"],
         },
         "sessionId": {
             "type": "string",
-            "description": "Session identifier",
+            "description": "Session identifier (null in practice)",
             "filterable": False,
         },
     },

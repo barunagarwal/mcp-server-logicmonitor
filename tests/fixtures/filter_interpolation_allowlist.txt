@@ -15,8 +15,8 @@ alerts.py: str(acked).lower()
 alerts.py: str(cleared).lower()
 alerts.py: str(sdted).lower()
 api_tokens.py: token_id
-audit.py: end_time
-audit.py: start_time
+audit.py: int(end_time)
+audit.py: int(start_time)
 audit.py: token_id
 collectors.py: cid
 collectors.py: collector_group_id

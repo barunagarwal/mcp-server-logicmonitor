@@ -218,6 +218,79 @@ class TestApiTokens:
         result = await get_api_token(client, token_id=999)
         assert result[0].text.startswith("Error: API token 999 not found")
 
+    @respx.mock
+    async def test_get_api_tokens_returns_access_id_and_type(self, client):
+        """access_id is what get_api_token_audit matches on, so the listing carries it."""
+        from lm_mcp.tools.api_tokens import get_api_tokens
+
+        respx.get("https://test.logicmonitor.com/santaba/rest/setting/admins/apitokens").mock(
+            return_value=httpx.Response(
+                200,
+                json={
+                    "items": [
+                        {"id": 7, "accessId": "AbCdEfGhIjKlMnOpQrSt", "adminId": 3, "type": "LMv1"}
+                    ],
+                    "total": 1,
+                },
+            )
+        )
+
+        token = json.loads((await get_api_tokens(client))[0].text)["api_tokens"][0]
+        assert token["access_id"] == "AbCdEfGhIjKlMnOpQrSt"
+        assert token["type"] == "LMv1"
+
+    @respx.mock
+    async def test_get_api_token_returns_access_id_and_type(self, client):
+        from lm_mcp.tools.api_tokens import get_api_token
+
+        respx.get("https://test.logicmonitor.com/santaba/rest/setting/admins/apitokens").mock(
+            return_value=httpx.Response(
+                200,
+                json={
+                    "items": [
+                        {
+                            "id": 7,
+                            "accessId": "AbCdEfGhIjKlMnOpQrSt",
+                            "adminId": 3,
+                            "type": "Bearer",
+                        }
+                    ],
+                    "total": 1,
+                },
+            )
+        )
+
+        token = json.loads((await get_api_token(client, token_id=7))[0].text)
+        assert token["access_id"] == "AbCdEfGhIjKlMnOpQrSt"
+        assert token["type"] == "Bearer"
+
+    @respx.mock
+    async def test_get_api_token_without_admin_rejects_a_different_id(self, client):
+        """A lookup that returns some other token is not found, not that token's data."""
+        from lm_mcp.tools.api_tokens import get_api_token
+
+        respx.get("https://test.logicmonitor.com/santaba/rest/setting/admins/apitokens").mock(
+            return_value=httpx.Response(
+                200, json={"items": [{"id": 8, "adminId": 3, "note": "other"}], "total": 1}
+            )
+        )
+
+        result = await get_api_token(client, token_id=7)
+        assert result[0].text.startswith("Error: API token 7 not found")
+
+    @respx.mock
+    async def test_get_api_tokens_tolerates_null_roles(self, client):
+        from lm_mcp.tools.api_tokens import get_api_tokens
+
+        respx.get("https://test.logicmonitor.com/santaba/rest/setting/admins/apitokens").mock(
+            return_value=httpx.Response(
+                200, json={"items": [{"id": 7, "adminId": 3, "roles": None}], "total": 1}
+            )
+        )
+
+        token = json.loads((await get_api_tokens(client))[0].text)["api_tokens"][0]
+        assert token["roles"] == []
+
 
 class TestAccessGroups:
     @respx.mock
