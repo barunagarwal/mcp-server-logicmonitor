@@ -794,7 +794,7 @@ Parameters:
 
 Pre-Execution Safety Checklist:
 1. Verify collector version >= 39.200 using get_collector
-2. Confirm device is reachable (hostStatus != 1) using get_device
+2. Confirm device is reachable (hostStatus is not "dead") using get_device
 3. Review the remediation source script using get_remediationsource
 4. Check AppliesTo script matches the target device
 5. Look for state-mutating keywords (restart, rm, delete, stop, kill, reboot, shutdown)

@@ -9,6 +9,17 @@ from mcp.types import TextContent
 
 from lm_mcp.tools import format_response, handle_error, safe_total
 
+# The v3 API returns hostStatus as a word ("dead"); older payloads used 1. Accept both.
+_DEAD_HOST_STATUS = {1, "1", "dead"}
+
+
+def is_dead_host_status(value: object) -> bool:
+    """True when a device's hostStatus says it is dead, in either the word or numeric form."""
+    if isinstance(value, str):
+        value = value.strip().lower()
+    return value in _DEAD_HOST_STATUS
+
+
 if TYPE_CHECKING:
     from lm_mcp.client import LogicMonitorClient
 
@@ -72,13 +83,14 @@ async def run_pre_execution_checks(
 
     # Check: device reachable
     device = await client.get(f"/device/devices/{host_id}")
-    if device.get("hostStatus", -1) == 1:
+    if is_dead_host_status(device.get("hostStatus")):
         return (
             {
                 "error": True,
                 "code": "DEVICE_UNREACHABLE",
                 "message": (
-                    f"Device {host_id} is dead (hostStatus=1). Cannot execute {source_kind}."
+                    f"Device {host_id} is dead (hostStatus={device.get('hostStatus')}). "
+                    f"Cannot execute {source_kind}."
                 ),
                 "suggestion": f"Verify device connectivity before executing {source_kind}.",
             },

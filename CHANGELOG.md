@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- `get_devices` (`status=`) returned nothing for every status: it filtered on `hostStatus:0`
+  to `hostStatus:4`, which match nothing on a live portal. It now sends the quoted word
+  (`hostStatus:"dead"`); an unquoted word is rejected by the API. This also fixes
+  `portal_overview`, whose dead-device list was always empty.
+- The diagnostic and remediation execution guard checked `hostStatus == 1`, but the API
+  returns `"dead"`, so a dead device was never refused up front. It now accepts either form.
+- The filter, enum, schema and guide resources and the remediation prompt taught numeric
+  `hostStatus` filters. On a live portal `hostStatus:0` matches nothing and `hostStatus!:0`
+  matches every device. They now teach the quoted words, and a test fails if a numeric
+  `hostStatus` filter comes back.
+
 ### Added
 
 - `LM_HTTP_AUTH_TOKEN`: opt-in inbound bearer authentication for the HTTP

@@ -11,13 +11,13 @@ FILTER_OPERATORS = {
         ":": {
             "name": "equals",
             "description": "Exact match comparison",
-            "examples": ["severity:4", "hostStatus:0", "cleared:false"],
+            "examples": ["severity:4", 'hostStatus:"normal"', "cleared:false"],
             "supports_types": ["string", "integer", "boolean"],
         },
         "!:": {
             "name": "not_equals",
             "description": "Not equal comparison",
-            "examples": ["hostStatus!:0", "severity!:1"],
+            "examples": ['hostStatus!:"normal"', "severity!:1"],
             "supports_types": ["string", "integer", "boolean"],
         },
         "~": {
@@ -62,7 +62,7 @@ FILTER_OPERATORS = {
         "description": "Multiple filters are combined with comma (AND logic)",
         "examples": [
             "severity:4,cleared:false (critical AND active)",
-            "hostStatus:0,displayName~prod (normal AND name contains prod)",
+            'hostStatus:"normal",displayName~prod (normal AND name contains prod)',
             "startEpoch>:1704067200000,severity>:3 (recent AND error+critical)",
         ],
     },
@@ -219,10 +219,13 @@ DEVICE_FILTERS = {
             "examples": ["name~192.168"],
         },
         "hostStatus": {
-            "type": "integer",
-            "description": "Device status (0=normal, 1=dead, etc.)",
+            "type": "string",
+            "description": (
+                "Device status as a quoted word: normal, dead, dead-collector, unmonitored, "
+                "disabled. Numeric codes match nothing"
+            ),
             "operators": [":", "!:"],
-            "examples": ["hostStatus:0", "hostStatus!:0"],
+            "examples": ['hostStatus:"dead"', 'hostStatus!:"normal"'],
         },
         "hostGroupIds": {
             "type": "string",
@@ -252,15 +255,15 @@ DEVICE_FILTERS = {
     "common_queries": [
         {
             "description": "All normal devices",
-            "filter": "hostStatus:0",
+            "filter": 'hostStatus:"normal"',
         },
         {
             "description": "Dead or problematic devices",
-            "filter": "hostStatus!:0",
+            "filter": 'hostStatus!:"normal"',
         },
         {
             "description": "Production devices by name",
-            "filter": "displayName~prod,hostStatus:0",
+            "filter": 'displayName~prod,hostStatus:"normal"',
         },
         {
             "description": "Devices in specific group",

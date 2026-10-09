@@ -366,6 +366,21 @@ class TestExecuteRemediation:
         assert "dead" in data.lower() or "DEVICE_UNREACHABLE" in data
 
     @respx.mock
+    async def test_execute_remediation_dead_device_word_form_blocked(self, client, enable_writes):
+        """The v3 API reports hostStatus as the word "dead"; that must block too."""
+        from lm_mcp.tools.remediationsources import execute_remediation
+
+        respx.get("https://test.logicmonitor.com/santaba/rest/device/devices/1").mock(
+            return_value=httpx.Response(
+                200,
+                json={"id": 1, "hostStatus": "dead", "preferredCollectorId": 10},
+            )
+        )
+
+        result = await execute_remediation(client, host_id=1, remediation_source_id=100)
+        assert "is dead (hostStatus=dead)" in result[0].text
+
+    @respx.mock
     async def test_execute_remediation_old_collector_blocked(self, client, enable_writes):
         """execute_remediation blocks when collector version is too old."""
         from lm_mcp.tools.remediationsources import execute_remediation

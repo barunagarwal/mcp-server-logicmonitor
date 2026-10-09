@@ -114,7 +114,7 @@ class TestGetDevices:
 
         params = dict(route.calls[0].request.url.params)
         assert "filter" in params
-        assert "hostStatus:1" in params["filter"]
+        assert 'hostStatus:"dead"' in params["filter"]
 
     @respx.mock
     async def test_get_devices_status_dead_collector(self, client):
@@ -129,7 +129,7 @@ class TestGetDevices:
 
         params = dict(route.calls[0].request.url.params)
         assert "filter" in params
-        assert "hostStatus:2" in params["filter"]
+        assert 'hostStatus:"dead-collector"' in params["filter"]
 
     @respx.mock
     async def test_get_devices_negative_total_sanitized(self, client):
@@ -848,3 +848,33 @@ class TestBulkDeleteDevices:
         data = json.loads(result[0].text)
         assert data["succeeded"] == 1
         assert data["failed"] == 1
+
+
+class TestHostStatusFilterForm:
+    """The v3 API filters hostStatus on the quoted word; numeric codes match nothing."""
+
+    def test_every_status_maps_to_a_quoted_word(self):
+        from lm_mcp.tools.devices import DEVICE_STATUS_MAP
+
+        for name, value in DEVICE_STATUS_MAP.items():
+            assert value == f'"{name}"'
+
+    def test_dead_guard_accepts_word_and_number(self):
+        from lm_mcp.tools.diagnostic_remediation import is_dead_host_status
+
+        assert is_dead_host_status("dead") and is_dead_host_status("Dead ")
+        assert is_dead_host_status(1) and is_dead_host_status("1")
+        assert not is_dead_host_status("normal") and not is_dead_host_status(0)
+        assert not is_dead_host_status(None)
+
+    def test_resources_teach_no_numeric_host_status(self):
+        import json
+        import re
+
+        from lm_mcp.resources import enums, filters, guides
+
+        text = json.dumps(
+            [getattr(m, n) for m in (enums, filters, guides) for n in dir(m) if n.isupper()],
+            default=str,
+        )
+        assert not re.search(r"hostStatus!?:\d", text)

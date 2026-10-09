@@ -22,13 +22,16 @@ if TYPE_CHECKING:
     from lm_mcp.client import LogicMonitorClient
 
 
-# Device status mapping: friendly name -> LM API numeric value for hostStatus filter
+# Device status mapping: friendly name -> the value the v3 API filters hostStatus on.
+# The API returns hostStatus as a word and filters on the quoted word. The numeric codes in
+# older docs (0 = normal, 1 = dead, 2 = dead-collector) match nothing on a live portal, and an
+# unquoted word is rejected as an invalid filter.
 DEVICE_STATUS_MAP = {
-    "normal": 0,
-    "dead": 1,
-    "dead-collector": 2,
-    "unmonitored": 3,
-    "disabled": 4,
+    "normal": '"normal"',
+    "dead": '"dead"',
+    "dead-collector": '"dead-collector"',
+    "unmonitored": '"unmonitored"',
+    "disabled": '"disabled"',
 }
 
 
