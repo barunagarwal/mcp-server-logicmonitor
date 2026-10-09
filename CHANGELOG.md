@@ -9,6 +9,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- `assess_collector_health`: is the collector the cause? For an insight's `device_ids`,
+  given `collector_ids`, or the whole fleet, it puts each collector into one state, the first
+  rule that matches: `down`, `silent_reported_up`, `up_devices_unreachable`,
+  `up_losing_work`, then `healthy` or `unknown`. Each state carries its evidence, and
+  `concentration` is the share of the insight's devices on that collector. Tier 1 is about
+  five read-only calls run concurrently, whatever the fleet size. `use_debug` adds tier 2:
+  the collector's stored health check, parsed into per-method all-NaN rates, inside one time
+  budget. Collectors not monitored as a resource are named, and missing signals read as
+  `unknown`, never as healthy.
+- `collector_debug`: runs one collector debug command from a fixed list of 30 read-only
+  commands (collector health, task lists, logs, device probes). Callers pass a command name
+  and typed arguments; the tool builds the command line and refuses anything that changes
+  the collector, runs code on its host, writes to a device or carries a credential. One
+  wall-clock budget per call, both read forms polled on the same session, still-running
+  replies treated as pending, its own POST/GET rate budget, and explicit states
+  (`answered`, `no_reply`, `refused`, `disabled`, `unsupported`, `rejected_by_tool`,
+  `rate_limited`, `error`). `device_id` fills the host and the serving collector.
+- Skills `lm-collector` (when to call the assessment and how to read its states) and
+  `lm-collector-debug` (an automated sequence for agents, about 8 s, and symptom-led chains
+  for engineers).
+
+### Added
+
 - `LM_HTTP_AUTH_TOKEN`: opt-in inbound bearer authentication for the HTTP
   transport. When set, `/mcp` and `/api/v1/*` require
   `Authorization: Bearer <token>` (constant-time comparison) and return 401

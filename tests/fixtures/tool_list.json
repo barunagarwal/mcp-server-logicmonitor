@@ -219,6 +219,65 @@
       "type": "object"
     }
   },
+  "assess_collector_health": {
+    "annotations": {
+      "destructiveHint": false,
+      "idempotentHint": true,
+      "openWorldHint": true,
+      "readOnlyHint": true,
+      "title": null
+    },
+    "description": "Is the collector the cause? Call this when an alert correlation or insight groups devices that share a collector, before reasoning about the devices. Pass the insight's device_ids (or collector_ids, or nothing for the fleet). Returns one state per collector, the first rule that matches: down (isDown, or the collector's own resource at hostStatus dead), silent_reported_up (watchdog silent over an hour while LM reports it up), up_devices_unreachable (collector live, most of its devices dead: a path fault downstream), up_losing_work (LM thresholds breached on its self-monitoring modules), healthy, or unknown (a required signal was missing; never read as healthy). Each state carries its evidence, and concentration = share of the insight's devices on that collector. Read-only, about six API calls whatever the fleet size, run concurrently. use_debug adds the collector's stored health check, parsed into per-method all-NaN rates, slower and time-boxed by debug_budget_seconds.",
+    "inputSchema": {
+      "properties": {
+        "collector_ids": {
+          "description": "Assess these collectors. Ignored when device_ids is set.",
+          "items": {
+            "type": "integer"
+          },
+          "type": "array"
+        },
+        "dark_share": {
+          "default": 0.8,
+          "description": "Share of a live collector's devices at hostStatus dead that reads as up_devices_unreachable",
+          "type": "number"
+        },
+        "debug_budget_seconds": {
+          "default": 15,
+          "description": "Wall-clock budget shared by all tier-2 reads (max 60). Reads that do not answer in time return no_reply; tier 1 is returned regardless",
+          "type": "number"
+        },
+        "device_ids": {
+          "description": "Device IDs from the insight. Their collectors are assessed and concentration is reported. Up to 1000.",
+          "items": {
+            "type": "integer"
+          },
+          "type": "array"
+        },
+        "include_healthy": {
+          "default": false,
+          "description": "Fleet scope only: also list healthy collectors",
+          "type": "boolean"
+        },
+        "min_dark": {
+          "default": 5,
+          "description": "Fewest dead devices before up_devices_unreachable can fire",
+          "type": "integer"
+        },
+        "use_debug": {
+          "default": false,
+          "description": "Tier 2: also read the stored health check (!shealthcheck func=detail) for up to 5 collectors in scope. Needs debug rights on the collector. Slower; never changes a state",
+          "type": "boolean"
+        },
+        "watchdog_stale_seconds": {
+          "default": 3600,
+          "description": "Watchdog age that means the agent is not running",
+          "type": "integer"
+        }
+      },
+      "type": "object"
+    }
+  },
   "audit_network_monitoring_coverage": {
     "annotations": {
       "destructiveHint": false,
@@ -573,6 +632,82 @@
         "device_id",
         "device_datasource_id",
         "instance_id"
+      ],
+      "type": "object"
+    }
+  },
+  "collector_debug": {
+    "annotations": {
+      "destructiveHint": false,
+      "idempotentHint": true,
+      "openWorldHint": true,
+      "readOnlyHint": true,
+      "title": null
+    },
+    "description": "Run ONE collector debug command from a fixed safe list and return what the collector said. Use after assess_collector_health has named a collector, to confirm one narrow question; never to explore. Callers pick a command name and typed args; the tool builds the command line, refuses anything that changes the collector, runs code on its host, writes to a device or carries a credential, and stops at budget_seconds. Fast commands for an investigation: uptime, health_check (parsed per-method all-NaN rates; checkpoint status alone is misleading), perf (lost work by method or module, filter h= to one device), getconfig (e.g. collector.wmi.threadpool). Device probes (ping, nslookup, snmpdiagnose, snmpget, snmpwalk, wmi, winrm, cim, sslcerts, http) use the device's stored credentials; pass device_id to fill the host and collector. Status is one of answered, no_reply, refused (no Debug permission), disabled, unsupported, rejected_by_tool, rate_limited, error. Every allowlisted command only reads; the call opens a debug session, which the portal records in its Audit Log under the caller's identity. Needs the collector Debug permission.",
+    "inputSchema": {
+      "properties": {
+        "args": {
+          "description": "Typed arguments for the command, e.g. {host}, {host, oids}, {host, port}, {url}, {key}, {type, dsFilterColumn, ds, h}, {h | c} for tlist, {level, n, files} for logsurf. No credentials",
+          "type": "object"
+        },
+        "budget_seconds": {
+          "default": 15,
+          "description": "Wall-clock budget for the whole call, 2 to 60",
+          "type": "number"
+        },
+        "collector_id": {
+          "description": "Collector to run it on. Optional when device_id is given",
+          "type": "integer"
+        },
+        "command": {
+          "description": "The safe command to run",
+          "enum": [
+            "adlist",
+            "aplist",
+            "avslist",
+            "checkserverconnectivity",
+            "cim",
+            "debughistory",
+            "dxlist",
+            "firewallstatus",
+            "getconfig",
+            "health_check",
+            "http",
+            "ipaddress",
+            "logsurf",
+            "macaddress",
+            "nslookup",
+            "nsplist",
+            "perf",
+            "ping",
+            "reportercache",
+            "snmpdiagnose",
+            "snmpget",
+            "snmpwalk",
+            "splist",
+            "sslcerts",
+            "tasklist",
+            "tlist",
+            "tplist",
+            "uptime",
+            "winrm",
+            "wmi"
+          ],
+          "type": "string"
+        },
+        "device_id": {
+          "description": "Device to probe: fills args.host with the device's name and, if collector_id is not given, uses the collector that serves it",
+          "type": "integer"
+        },
+        "max_output_chars": {
+          "default": 20000,
+          "description": "Cap on raw output returned (health_check returns a parsed summary and at most 4,000 raw characters)",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "command"
       ],
       "type": "object"
     }
