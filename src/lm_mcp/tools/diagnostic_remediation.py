@@ -19,6 +19,10 @@ _OUTPUT_CHAR_LIMIT = 10000
 # ADR manual execution requires this collector build or newer.
 _MIN_COLLECTOR_BUILD = 39.200
 
+# The v3 API returns hostStatus as a word, and "dead" is the word for a dead device.
+# A number is not a v3 hostStatus value, so it never counts as dead.
+_DEAD_HOST_STATUS = {"dead"}
+
 _MUTATION_KEYWORDS = [
     "restart",
     "rm ",
@@ -34,6 +38,11 @@ _SOURCE_PATHS = {
     "diagnostic": "/setting/diagnosticsources",
     "remediation": "/setting/remediationsources",
 }
+
+
+def _is_dead_host_status(value: object) -> bool:
+    """True when a device's hostStatus is exactly the word "dead"."""
+    return isinstance(value, str) and value in _DEAD_HOST_STATUS
 
 
 async def run_pre_execution_checks(
@@ -72,13 +81,13 @@ async def run_pre_execution_checks(
 
     # Check: device reachable
     device = await client.get(f"/device/devices/{host_id}")
-    if device.get("hostStatus", -1) == 1:
+    if _is_dead_host_status(device.get("hostStatus")):
         return (
             {
                 "error": True,
                 "code": "DEVICE_UNREACHABLE",
                 "message": (
-                    f"Device {host_id} is dead (hostStatus=1). Cannot execute {source_kind}."
+                    f"Device {host_id} is dead (hostStatus=dead). Cannot execute {source_kind}."
                 ),
                 "suggestion": f"Verify device connectivity before executing {source_kind}.",
             },

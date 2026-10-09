@@ -101,7 +101,7 @@ class TestGetResourceContent:
         assert data["name"] == "device-status"
         assert "values" in data
         assert "normal" in data["values"]
-        assert data["values"]["normal"]["api_value"] == 0
+        assert data["values"]["normal"]["api_value"] == "normal"
 
     def test_get_enum_sdt_type(self):
         """get_resource_content returns sdt-type enum JSON."""

@@ -22,13 +22,17 @@ if TYPE_CHECKING:
     from lm_mcp.client import LogicMonitorClient
 
 
-# Device status mapping: friendly name -> LM API numeric value for hostStatus filter
-DEVICE_STATUS_MAP = {
-    "normal": 0,
-    "dead": 1,
-    "dead-collector": 2,
-    "unmonitored": 3,
-    "disabled": 4,
+# Device status -> the hostStatus filter clause get_devices sends for it.
+# The v3 API returns hostStatus as a word and filters on the quoted word. A numeric
+# code matches nothing on a live portal, and an unquoted word is rejected as an
+# invalid filter. The clauses are written out in full so the hostStatus guard in
+# tests/test_hoststatus_words.py reads them as they go on the wire.
+DEVICE_STATUS_FILTERS = {
+    "normal": 'hostStatus:"normal"',
+    "dead": 'hostStatus:"dead"',
+    "dead-collector": 'hostStatus:"dead-collector"',
+    "unmonitored": 'hostStatus:"unmonitored"',
+    "disabled": 'hostStatus:"disabled"',
 }
 
 
@@ -82,8 +86,8 @@ async def get_devices(
                 clean_host, was_modified = sanitize_filter_value(hostname_filter)
                 wildcards_stripped = wildcards_stripped or was_modified
                 filters.append(f"name~{quote_filter_value(clean_host)}")
-            if status and status.lower() in DEVICE_STATUS_MAP:
-                filters.append(f"hostStatus:{DEVICE_STATUS_MAP[status.lower()]}")
+            if status and status.lower() in DEVICE_STATUS_FILTERS:
+                filters.append(DEVICE_STATUS_FILTERS[status.lower()])
 
             if filters:
                 params["filter"] = ",".join(filters)

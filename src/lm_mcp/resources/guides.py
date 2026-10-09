@@ -530,8 +530,11 @@ COMMON_QUERY_EXAMPLES = {
         {
             "description": "Find dead devices",
             "tool": "get_devices",
-            "filter": "hostStatus:1",
-            "notes": "hostStatus 1 = dead. Use get_devices with status='dead'.",
+            "filter": 'hostStatus:"dead"',
+            "notes": (
+                "hostStatus filters on the quoted word; numeric codes match nothing. "
+                "Or use get_devices with status='dead'."
+            ),
         },
         {
             "description": "Find alerts for a specific device by name",

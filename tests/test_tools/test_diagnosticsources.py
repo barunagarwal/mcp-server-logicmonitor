@@ -409,11 +409,11 @@ class TestExecuteDiagnostic:
         """execute_diagnostic refuses to run against a dead device."""
         from lm_mcp.tools.diagnosticsources import execute_diagnostic
 
-        _mock_execute_prechecks(host_status=1)
+        _mock_execute_prechecks(host_status="dead")
 
         result = await execute_diagnostic(client, host_id=1786, diagnostic_source_id=12)
 
-        assert "DEVICE_UNREACHABLE" in result[0].text or "dead" in result[0].text
+        assert "is dead (hostStatus=dead)" in result[0].text
 
     @respx.mock
     async def test_execute_diagnostic_blocks_old_collector(self, client, enable_writes):

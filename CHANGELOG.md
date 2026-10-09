@@ -7,6 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- `get_devices` (`status=`) returned nothing for every status: it filtered on the numeric
+  codes `hostStatus:0` to `hostStatus:4`, but the v3 API filters `hostStatus` on the word,
+  and on a live portal `hostStatus:0` and `hostStatus:1` match nothing. It now sends the
+  quoted word (`hostStatus:"dead"`); an unquoted word is rejected by the API. This also
+  fixes `portal_overview`, whose dead-device list was always empty.
+- The diagnostic and remediation execution guard checked `hostStatus == 1`, but the API
+  returns `"dead"`, so a dead device was never refused up front. It now refuses on the word
+  `"dead"` only; a number is not a v3 `hostStatus` value.
+- The resources taught `hostStatus` as a number: the filter, enum and guide resources gave
+  numeric filters, the schema resource an integer type and example, the example-responses
+  resource a numeric `host_status`, and the remediation prompt a `hostStatus != 1` check. On
+  a live portal `hostStatus:0` matches nothing and `hostStatus!:0` matches every device.
+  They now use the words. The `hostStatus` word guard scans every module under
+  `src/lm_mcp`, and a new check walks each resource for a `hostStatus` value that is a
+  number or an integer type.
+
 ## [4.2.1] - 2026-10-21
 
 ### Fixed

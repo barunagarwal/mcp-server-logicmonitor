@@ -38,32 +38,36 @@ DEVICE_STATUS_ENUM = {
     "description": "Device monitoring status values",
     "values": {
         "normal": {
-            "api_value": 0,
+            "api_value": "normal",
             "description": "Device is being monitored normally",
         },
         "dead": {
-            "api_value": 1,
+            "api_value": "dead",
             "description": "Device is not responding",
         },
         "dead-collector": {
-            "api_value": 2,
+            "api_value": "dead-collector",
             "description": "Collector monitoring this device is down",
         },
         "unmonitored": {
-            "api_value": 3,
+            "api_value": "unmonitored",
             "description": "Device exists but is not being monitored",
         },
         "disabled": {
-            "api_value": 4,
+            "api_value": "disabled",
             "description": "Monitoring is disabled for this device",
         },
     },
     "api_field": "hostStatus",
     "filter_examples": [
-        "hostStatus:0 (normal devices)",
-        "hostStatus:1 (dead devices)",
-        "hostStatus!:0 (all non-normal devices)",
+        'hostStatus:"normal" (normal devices)',
+        'hostStatus:"dead" (dead devices)',
+        'hostStatus!:"normal" (all non-normal devices)',
     ],
+    "note": (
+        "The API returns and filters hostStatus as a quoted word. Numeric codes "
+        "(0, 1, 2) match nothing, and an unquoted word is rejected."
+    ),
 }
 
 # SDT (Scheduled Downtime) type values

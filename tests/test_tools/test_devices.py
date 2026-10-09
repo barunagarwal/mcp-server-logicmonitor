@@ -114,7 +114,7 @@ class TestGetDevices:
 
         params = dict(route.calls[0].request.url.params)
         assert "filter" in params
-        assert "hostStatus:1" in params["filter"]
+        assert 'hostStatus:"dead"' in params["filter"]
 
     @respx.mock
     async def test_get_devices_status_dead_collector(self, client):
@@ -129,7 +129,7 @@ class TestGetDevices:
 
         params = dict(route.calls[0].request.url.params)
         assert "filter" in params
-        assert "hostStatus:2" in params["filter"]
+        assert 'hostStatus:"dead-collector"' in params["filter"]
 
     @respx.mock
     async def test_get_devices_negative_total_sanitized(self, client):
@@ -848,3 +848,57 @@ class TestBulkDeleteDevices:
         data = json.loads(result[0].text)
         assert data["succeeded"] == 1
         assert data["failed"] == 1
+
+
+DEVICE_STATUS_WORDS = ("normal", "dead", "dead-collector", "unmonitored", "disabled")
+
+
+class TestHostStatusFilterForm:
+    """The v3 API filters hostStatus on the quoted word; numeric codes match nothing."""
+
+    def test_every_schema_status_has_a_filter(self):
+        """A status the schema offers but the map lacks would list every device unfiltered."""
+        from lm_mcp.registry import TOOLS
+        from lm_mcp.tools.devices import DEVICE_STATUS_FILTERS
+
+        tool = next(t for t in TOOLS if t.name == "get_devices")
+        offered = set(tool.inputSchema["properties"]["status"]["enum"])
+        assert offered == set(DEVICE_STATUS_FILTERS)
+
+    @respx.mock
+    @pytest.mark.parametrize("status", DEVICE_STATUS_WORDS)
+    async def test_get_devices_sends_quoted_word_for_each_status(self, client, status):
+        from lm_mcp.tools.devices import get_devices
+
+        route = respx.get("https://test.logicmonitor.com/santaba/rest/device/devices").mock(
+            return_value=httpx.Response(200, json={"items": [], "total": 0})
+        )
+
+        await get_devices(client, status=status)
+
+        assert route.calls[0].request.url.params["filter"] == f'hostStatus:"{status}"'
+
+    def test_dead_guard_accepts_the_word(self):
+        from lm_mcp.tools.diagnostic_remediation import _is_dead_host_status
+
+        assert _is_dead_host_status("dead")
+
+    @pytest.mark.parametrize(
+        "value",
+        [1, "1", 0, "0", "normal", "dead-collector", "Dead", " dead", None],
+        ids=[
+            "int-1",
+            "str-1",
+            "int-0",
+            "str-0",
+            "normal",
+            "dead-collector",
+            "Dead",
+            "space",
+            "none",
+        ],
+    )
+    def test_dead_guard_rejects_anything_but_the_word(self, value):
+        from lm_mcp.tools.diagnostic_remediation import _is_dead_host_status
+
+        assert not _is_dead_host_status(value)

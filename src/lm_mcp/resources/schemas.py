@@ -178,11 +178,11 @@ DEVICE_SCHEMA = {
             "example": "Production Web Server 01",
         },
         "hostStatus": {
-            "type": "integer",
-            "description": "Device status code - see enum device-status for values",
+            "type": "string",
+            "description": "Device status word - see enum device-status for values",
             "filterable": True,
             "enum_ref": "device-status",
-            "example": 0,
+            "example": "normal",
         },
         "hostGroupIds": {
             "type": "string",

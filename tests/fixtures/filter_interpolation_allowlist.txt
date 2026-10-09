@@ -25,7 +25,6 @@ correlation.py: SEVERITY_MAP[severity.lower()]
 correlation.py: start_epoch
 cost.py: or_values
 dashboards.py: group_id
-devices.py: DEVICE_STATUS_MAP[status.lower()]
 devices.py: group_id
 devices.py: parent_id
 event_correlation.py: start_epoch

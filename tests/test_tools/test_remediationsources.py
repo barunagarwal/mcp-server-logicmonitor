@@ -357,13 +357,13 @@ class TestExecuteRemediation:
         respx.get("https://test.logicmonitor.com/santaba/rest/device/devices/1").mock(
             return_value=httpx.Response(
                 200,
-                json={"id": 1, "hostStatus": 1, "preferredCollectorId": 10},
+                json={"id": 1, "hostStatus": "dead", "preferredCollectorId": 10},
             )
         )
 
         result = await execute_remediation(client, host_id=1, remediation_source_id=100)
         data = result[0].text
-        assert "dead" in data.lower() or "DEVICE_UNREACHABLE" in data
+        assert "is dead (hostStatus=dead)" in data
 
     @respx.mock
     async def test_execute_remediation_old_collector_blocked(self, client, enable_writes):
