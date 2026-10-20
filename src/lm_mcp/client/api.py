@@ -110,6 +110,19 @@ def _translate_lm_error(raw_message: str) -> tuple[str | None, str | None]:
     return None, None
 
 
+def _serialize_json_body(json_body: list | dict | None) -> str:
+    """Serialize a JSON request body once, as the string to sign and to send.
+
+    LMv1 HMAC signs the body string verbatim, so the client sends the UTF-8
+    bytes of this exact string instead of letting httpx serialize the body a
+    second time with its own separators. ``None`` means no body and signs as
+    ``""``; an empty dict still serializes to ``"{}"``.
+    """
+    if json_body is None:
+        return ""
+    return json.dumps(json_body, separators=(",", ":"), ensure_ascii=False)
+
+
 class LogicMonitorClient:
     """Async HTTP client for LogicMonitor REST API.
 
@@ -300,7 +313,8 @@ class LogicMonitorClient:
         # empty dict ``{}`` still serializes to ``"{}"`` and matches the body
         # httpx puts on the wire. LMv1 HMAC signs the body string verbatim, so
         # a ``""`` vs ``"{}"`` mismatch produces 401 on LMv1 portals.
-        body_str = json.dumps(json_body) if json_body is not None else ""
+        body_str = _serialize_json_body(json_body)
+        content = body_str.encode("utf-8") if json_body is not None else None
         headers = self._get_headers(method, path, body_str)
 
         log_api_request(method, path, params)
@@ -315,7 +329,7 @@ class LogicMonitorClient:
                     method=method,
                     url=url,
                     params=params,
-                    json=json_body,
+                    content=content,
                     headers=headers,
                 )
             except httpx.ConnectError as e:
@@ -523,7 +537,8 @@ class LogicMonitorClient:
         url = f"{self.ingest_url}{path}"
         # See note on ``request()`` -- empty body must serialize as ``"{}"`` so
         # the LMv1 HMAC signature matches what httpx actually transmits.
-        body_str = json.dumps(json_body) if json_body is not None else ""
+        body_str = _serialize_json_body(json_body)
+        content = body_str.encode("utf-8") if json_body is not None else None
 
         # Build headers with auth for the ingest path
         headers = {
@@ -539,7 +554,7 @@ class LogicMonitorClient:
                 response = await self._client.request(
                     method="POST",
                     url=url,
-                    json=json_body,
+                    content=content,
                     headers=headers,
                 )
             except httpx.ConnectError as e:

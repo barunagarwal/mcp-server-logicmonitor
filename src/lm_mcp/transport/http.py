@@ -11,6 +11,8 @@ from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
+    from collections.abc import Iterable
+
     from starlette.applications import Starlette
     from starlette.types import ASGIApp, Receive, Scope, Send
 
@@ -19,8 +21,9 @@ logger = logging.getLogger(__name__)
 # Probe and info routes stay reachable without a token so orchestration works
 # out of the box: their bodies carry no LM data, only component status. (Probes
 # *can* send headers -- Kubernetes httpGet takes httpHeaders and curl takes -H --
-# so an operator who wants them gated can front them with a proxy.) Note that
-# /readyz reaches the LM API when LM_HEALTH_CHECK_CONNECTIVITY is enabled.
+# so an operator who wants them gated can front them with a proxy.) Only /health
+# reaches the LM API, and only for a caller that passes the bearer check (or on a
+# server with no token configured) when LM_HEALTH_CHECK_CONNECTIVITY is enabled.
 _OPEN_PATHS = frozenset({"/", "/health", "/healthz", "/readyz"})
 
 
@@ -33,6 +36,25 @@ def _is_open_path(path: str) -> bool:
     their trailing-slash forms match; everything else stays gated.
     """
     return path in _OPEN_PATHS or path.rstrip("/") in _OPEN_PATHS
+
+
+def _bearer_matches(headers: Iterable[tuple[bytes, bytes]], token: bytes) -> bool:
+    """Return True when the ASGI headers carry ``Authorization: Bearer <token>``.
+
+    Shared by the auth middleware and the /health connectivity gate so both
+    accept exactly the same credentials.
+    """
+    provided = b""
+    for name, value in headers:
+        if name == b"authorization":
+            provided = value
+            break
+
+    # RFC 7235 defines auth-scheme as case-insensitive. Only the credentials
+    # are secret, so only they get the constant-time comparison; a missing or
+    # malformed header degrades to comparing against empty bytes.
+    scheme, _, credentials = provided.partition(b" ")
+    return scheme.lower() == b"bearer" and secrets.compare_digest(credentials, token)
 
 
 class BearerAuthMiddleware:
@@ -53,17 +75,7 @@ class BearerAuthMiddleware:
             await self.app(scope, receive, send)
             return
 
-        provided = b""
-        for name, value in scope.get("headers", []):
-            if name == b"authorization":
-                provided = value
-                break
-
-        # RFC 7235 defines auth-scheme as case-insensitive. Only the credentials
-        # are secret, so only they get the constant-time comparison; a missing or
-        # malformed header degrades to comparing against empty bytes.
-        scheme, _, credentials = provided.partition(b" ")
-        if scheme.lower() == b"bearer" and secrets.compare_digest(credentials, self._token):
+        if _bearer_matches(scope.get("headers", []), self._token):
             await self.app(scope, receive, send)
             return
 
@@ -100,10 +112,20 @@ def create_asgi_app() -> Starlette:
     config = get_config()
 
     async def health(request: Request) -> Response:
-        """Detailed health check endpoint."""
+        """Detailed health check endpoint.
+
+        Adds the LM API connectivity check when LM_HEALTH_CHECK_CONNECTIVITY is on
+        and the caller could also reach /mcp: no inbound token is configured, or the
+        request carries it. /health is an open path, so anonymous callers get the
+        local checks only and cannot spend the portal's API quota.
+        """
         from lm_mcp.health import run_health_checks
 
-        result = await run_health_checks(include_connectivity=False)
+        include_connectivity = config.health_check_connectivity and (
+            not config.http_auth_token
+            or _bearer_matches(request.scope["headers"], config.http_auth_token.encode())
+        )
+        result = await run_health_checks(include_connectivity=include_connectivity)
         status_code = 200 if result.status == "healthy" else 503
         return JSONResponse(result.to_dict(), status_code=status_code)
 
@@ -117,11 +139,14 @@ def create_asgi_app() -> Starlette:
         return Response(content="ok", status_code=200)
 
     async def readyz(request: Request) -> Response:
-        """Kubernetes readiness probe endpoint."""
+        """Kubernetes readiness probe endpoint.
+
+        Never calls the LM API: probes are unauthenticated and frequent, and a
+        connectivity failure grades ``warn``, which could not change this response.
+        """
         from lm_mcp.health import run_health_checks
 
-        include_connectivity = config.health_check_connectivity
-        result = await run_health_checks(include_connectivity=include_connectivity)
+        result = await run_health_checks(include_connectivity=False)
         if result.status == "unhealthy":
             return Response(content="not ready", status_code=503)
         return Response(content="ready", status_code=200)
@@ -395,6 +420,7 @@ async def create_http_server() -> None:
         auth=auth,
         timeout=config.timeout,
         api_version=config.api_version,
+        max_retries=config.max_retries,
         ingest_url=config.ingest_url,
     )
     _set_client(client)

@@ -690,7 +690,7 @@ class TestRequestBodyAuthSignature:
         ) as client:
             await client.post("/sdt/sdts", json_body={"type": "DeviceSDT"})
 
-        assert auth.captured_body == '{"type": "DeviceSDT"}'
+        assert auth.captured_body == '{"type":"DeviceSDT"}'
 
     @pytest.mark.asyncio
     @respx.mock

@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import logging
 from collections.abc import Callable, Coroutine
 from typing import TYPE_CHECKING
 
@@ -46,6 +47,7 @@ async def run_stdio() -> None:
             auth=auth,
             timeout=config.timeout,
             api_version=config.api_version,
+            max_retries=config.max_retries,
             ingest_url=config.ingest_url,
         )
         _set_client(client)
@@ -84,8 +86,6 @@ async def run_stdio() -> None:
             )
             _set_watsonx_client(watsonx_client)
         except ImportError:
-            import logging
-
             logging.getLogger(__name__).warning(
                 "ibm-watsonx-ai not installed; watsonx tools disabled. "
                 "Install with: uv add 'lm-mcp[ibm]'"
@@ -108,8 +108,6 @@ async def run_stdio() -> None:
                 )
                 _set_watsonx_client(watsonx_client)
             except ImportError:
-                import logging
-
                 logging.getLogger(__name__).warning(
                     "torch/transformers not installed; HuggingFace fallback disabled. "
                     "Install with: uv add 'lm-mcp[huggingface]'"

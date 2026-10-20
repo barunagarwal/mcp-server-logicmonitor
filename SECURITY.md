@@ -37,12 +37,13 @@ You can expect:
   return 401 otherwise. Starting without it logs a warning.
 - `/`, `/health`, `/healthz`, and `/readyz` stay unauthenticated so container
   healthchecks and orchestrator probes keep working. Their responses carry
-  component status, never LogicMonitor data. One caveat: with
-  `LM_HEALTH_CHECK_CONNECTIVITY=true` (off by default), each `/readyz` request
-  calls the LogicMonitor API with your credentials, so an unauthenticated
-  caller can consume your portal's API quota. Leave that flag off, or put the
-  probe endpoints behind your ingress, on deployments reachable from untrusted
-  networks.
+  component status, never LogicMonitor data. None of them calls the
+  LogicMonitor API for an unauthenticated caller: `/readyz` never does, and
+  with `LM_HEALTH_CHECK_CONNECTIVITY=true` (off by default) `/health` adds the
+  API connectivity check only when the request carries `LM_HTTP_AUTH_TOKEN`,
+  or when no token is configured and `/mcp` is open anyway. Earlier releases
+  pinged the API on every `/readyz` request when that flag was on, letting an
+  anonymous caller consume your portal's API quota; that is fixed (issue #56).
 - Pair the token with TLS (the Caddy profile in `deploy/`, or `LM_HTTP_SSL_*`)
   so it is not sent in cleartext.
 - The stdio transport is unaffected: it has no listening socket.

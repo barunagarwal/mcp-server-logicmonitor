@@ -1,6 +1,9 @@
 # Description: Tests for the health check module.
 # Description: Validates health check logic and status determination.
 
+import pytest
+import respx
+from httpx import Response
 
 from lm_mcp.health import HealthCheck, HealthResponse
 
@@ -184,3 +187,165 @@ class TestHealthStatusDetermination:
             overall = "healthy"
 
         assert overall == "unhealthy"
+
+
+PORTAL_BASE = "https://test.logicmonitor.com/santaba/rest"
+INBOUND_BEARER = "test-http-auth-token-0123"
+
+
+@pytest.fixture
+def connectivity_env(monkeypatch, reset_portals):
+    """HTTP config with LM_HEALTH_CHECK_CONNECTIVITY on and a real LM client bound.
+
+    create_asgi_app() does not build the LM client, and run_health_checks only pings
+    when one exists, so the client is bound here the way create_http_server binds it.
+    """
+    from lm_mcp.auth.bearer import BearerAuth
+    from lm_mcp.client import LogicMonitorClient
+    from lm_mcp.server import _set_client
+
+    monkeypatch.setenv("LM_PORTAL", "test.logicmonitor.com")
+    monkeypatch.setenv("LM_BEARER_TOKEN", "test-token")
+    monkeypatch.setenv("LM_HEALTH_CHECK_CONNECTIVITY", "true")
+    monkeypatch.delenv("LM_HTTP_AUTH_TOKEN", raising=False)
+    monkeypatch.delenv("LM_CORS_ORIGINS", raising=False)
+    _set_client(LogicMonitorClient(base_url=PORTAL_BASE, auth=BearerAuth("test-token")))
+
+
+@pytest.fixture
+def admins_route():
+    """The connectivity check's portal call, faked; yields the route to count calls."""
+    with respx.mock(assert_all_called=False) as router:
+        router.route(host="127.0.0.1").pass_through()
+        yield router.get(f"{PORTAL_BASE}/setting/admins").mock(
+            return_value=Response(200, json={"items": [], "total": 0})
+        )
+
+
+def _asgi_client():
+    from httpx import ASGITransport, AsyncClient
+
+    from lm_mcp.transport.http import create_asgi_app
+
+    return AsyncClient(transport=ASGITransport(app=create_asgi_app()), base_url="http://test")
+
+
+class TestReadyzStaysLocal:
+    """R1.5: /readyz never spends the portal's API quota (issue #56)."""
+
+    async def test_readyz_never_calls_portal(self, connectivity_env, admins_route):
+        """Fifty readiness probes with connectivity enabled make zero portal calls."""
+        async with _asgi_client() as client:
+            responses = [await client.get("/readyz") for _ in range(50)]
+
+        assert [r.status_code for r in responses] == [200] * 50
+        assert admins_route.call_count == 0
+
+
+class TestHealthConnectivityGate:
+    """R1.5: /health runs the connectivity check only for callers that could reach /mcp."""
+
+    async def test_health_checks_connectivity_when_no_token_configured(
+        self, connectivity_env, admins_route
+    ):
+        """With no inbound token, /mcp is open, so /health may ping the portal once."""
+        async with _asgi_client() as client:
+            resp = await client.get("/health")
+
+        assert admins_route.call_count == 1
+        assert resp.json()["checks"]["connectivity"]["status"] == "pass"
+
+    async def test_health_skips_connectivity_for_unauthenticated_caller(
+        self, connectivity_env, admins_route, monkeypatch
+    ):
+        """With a token configured, an anonymous /health stays local-only."""
+        monkeypatch.setenv("LM_HTTP_AUTH_TOKEN", INBOUND_BEARER)
+
+        async with _asgi_client() as client:
+            missing = await client.get("/health")
+            wrong = await client.get("/health", headers={"Authorization": "Bearer nope-nope"})
+
+        assert admins_route.call_count == 0
+        assert missing.status_code == 200
+        assert wrong.status_code == 200
+        assert "connectivity" not in missing.json()["checks"]
+
+    async def test_health_checks_connectivity_for_authenticated_caller(
+        self, connectivity_env, admins_route, monkeypatch
+    ):
+        """A caller presenting the inbound token gets the connectivity check."""
+        monkeypatch.setenv("LM_HTTP_AUTH_TOKEN", INBOUND_BEARER)
+
+        async with _asgi_client() as client:
+            resp = await client.get(
+                "/health", headers={"Authorization": f"Bearer {INBOUND_BEARER}"}
+            )
+
+        assert admins_route.call_count == 1
+        assert resp.json()["checks"]["connectivity"]["status"] == "pass"
+
+    async def test_live_server_gates_health_connectivity(
+        self, connectivity_env, admins_route, monkeypatch
+    ):
+        """Over a real uvicorn socket: probes stay local, only the token holder pings."""
+        import asyncio
+
+        import httpx
+        import uvicorn
+
+        from lm_mcp.transport.http import create_asgi_app
+
+        monkeypatch.setenv("LM_HTTP_AUTH_TOKEN", INBOUND_BEARER)
+        server = uvicorn.Server(
+            uvicorn.Config(create_asgi_app(), host="127.0.0.1", port=0, log_level="warning")
+        )
+        serving = asyncio.create_task(server.serve())
+        try:
+            while not server.started:
+                await asyncio.sleep(0.01)
+            port = server.servers[0].sockets[0].getsockname()[1]
+            async with httpx.AsyncClient(base_url=f"http://127.0.0.1:{port}") as client:
+                readyz = await client.get("/readyz")
+                anonymous = await client.get("/health")
+                assert admins_route.call_count == 0
+                authed = await client.get(
+                    "/health", headers={"Authorization": f"Bearer {INBOUND_BEARER}"}
+                )
+        finally:
+            server.should_exit = True
+            await serving
+
+        assert readyz.status_code == 200
+        assert anonymous.status_code == 200
+        assert authed.status_code == 200
+        assert admins_route.call_count == 1
+
+
+class TestHttpServerClientConstruction:
+    """create_http_server builds the LM client from configuration."""
+
+    async def test_http_client_uses_configured_max_retries(self, monkeypatch, reset_portals):
+        """R1.6: the HTTP transport's client gets LM_MAX_RETRIES, not the default."""
+        from unittest.mock import AsyncMock
+
+        import uvicorn
+
+        from lm_mcp import server as server_module
+        from lm_mcp.transport.http import create_http_server
+
+        for var in ("AWX_URL", "AWX_TOKEN", "WATSONX_API_KEY", "TF_WORKSPACE_DIR"):
+            monkeypatch.delenv(var, raising=False)
+        monkeypatch.setenv("LM_PORTAL", "test.logicmonitor.com")
+        monkeypatch.setenv("LM_BEARER_TOKEN", "test-token")
+        monkeypatch.setenv("LM_TRANSPORT", "http")
+        monkeypatch.setenv("LM_MAX_RETRIES", "7")
+        monkeypatch.setattr("lm_mcp.hf_config.get_hf_config", lambda: None)
+        # Shutdown closes the client, so read it while the server is "serving".
+        serving_clients = []
+        serve = AsyncMock(side_effect=lambda: serving_clients.append(server_module._client))
+        monkeypatch.setattr(uvicorn.Server, "serve", serve)
+
+        await create_http_server()
+
+        serve.assert_awaited_once()
+        assert serving_clients[0].max_retries == 7

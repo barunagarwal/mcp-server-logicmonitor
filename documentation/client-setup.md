@@ -11,7 +11,7 @@ Back to the [README](../README.md).
 ```bash
 claude mcp add logicmonitor \
   -e LM_PORTAL=yourcompany.logicmonitor.com \
-  -e LM_BEARER_TOKEN=your-bearer-token \
+  -e LM_BEARER_TOKEN=<your-bearer-token> \
   -e LM_ENABLE_WRITE_OPERATIONS=true \
   -- uvx --from lm-mcp lm-mcp-server
 ```
@@ -147,7 +147,7 @@ To enable write operations and ingestion APIs:
 ```bash
 codex mcp add logicmonitor \
   --env LM_PORTAL=yourcompany.logicmonitor.com \
-  --env LM_BEARER_TOKEN=your-bearer-token \
+  --env LM_BEARER_TOKEN=<your-bearer-token> \
   -- uvx --from lm-mcp lm-mcp-server
 ```
 
@@ -160,7 +160,7 @@ args = ["--from", "lm-mcp", "lm-mcp-server"]
 
 [mcp_servers.logicmonitor.env]
 LM_PORTAL = "yourcompany.logicmonitor.com"
-LM_BEARER_TOKEN = "your-bearer-token"
+LM_BEARER_TOKEN = "<your-bearer-token>"
 ```
 
 ### Cline (VS Code Extension)
