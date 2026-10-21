@@ -132,6 +132,92 @@ class TestApiTokens:
         data = json.loads(result[0].text)
         assert data["note"] == "CI/CD token"
 
+    @respx.mock
+    async def test_get_api_tokens_without_admin_lists_portal_wide(self, client):
+        """admin_id is optional; omitted, tokens are listed across the portal."""
+        from lm_mcp.tools.api_tokens import get_api_tokens
+
+        route = respx.get(
+            "https://test.logicmonitor.com/santaba/rest/setting/admins/apitokens"
+        ).mock(
+            return_value=httpx.Response(
+                200,
+                json={
+                    "items": [
+                        {
+                            "id": 100,
+                            "adminId": 1,
+                            "adminName": "admin",
+                            "note": "CI/CD token",
+                            "status": 2,
+                            "roles": [{"name": "administrator"}],
+                        },
+                        {
+                            "id": 101,
+                            "adminId": 7,
+                            "adminName": "svc-backup",
+                            "note": "backup job",
+                            "status": 2,
+                            "roles": [{"name": "readonly"}],
+                        },
+                    ],
+                    "total": 2,
+                },
+            )
+        )
+
+        result = await get_api_tokens(client, limit=25)
+        data = json.loads(result[0].text)
+        assert route.called
+        assert route.calls.last.request.url.params["size"] == "25"
+        assert [t["admin_id"] for t in data["api_tokens"]] == [1, 7]
+        assert data["total"] == 2
+
+    @respx.mock
+    async def test_get_api_token_without_admin_fetches_by_id(self, client):
+        """Omitted admin_id, the token is fetched by id through the portal-wide filter."""
+        from lm_mcp.tools.api_tokens import get_api_token
+
+        route = respx.get(
+            "https://test.logicmonitor.com/santaba/rest/setting/admins/apitokens"
+        ).mock(
+            return_value=httpx.Response(
+                200,
+                json={
+                    "items": [
+                        {
+                            "id": 100,
+                            "adminId": 1,
+                            "adminName": "admin",
+                            "note": "CI/CD token",
+                            "status": 2,
+                            "roles": [{"id": 1, "name": "administrator"}],
+                        }
+                    ],
+                    "total": 1,
+                },
+            )
+        )
+
+        result = await get_api_token(client, token_id=100)
+        data = json.loads(result[0].text)
+        assert route.calls.last.request.url.params["filter"] == "id:100"
+        assert data["id"] == 100
+        assert data["admin_id"] == 1
+        assert data["roles"] == [{"id": 1, "name": "administrator"}]
+
+    @respx.mock
+    async def test_get_api_token_without_admin_reports_missing_id(self, client):
+        """An id the portal-wide filter does not match is a not-found error, not empty data."""
+        from lm_mcp.tools.api_tokens import get_api_token
+
+        respx.get("https://test.logicmonitor.com/santaba/rest/setting/admins/apitokens").mock(
+            return_value=httpx.Response(200, json={"items": [], "total": 0})
+        )
+
+        result = await get_api_token(client, token_id=999)
+        assert result[0].text.startswith("Error: API token 999 not found")
+
 
 class TestAccessGroups:
     @respx.mock

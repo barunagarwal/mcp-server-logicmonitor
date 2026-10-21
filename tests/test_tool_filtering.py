@@ -88,7 +88,9 @@ class TestCallToolRejection:
         from lm_mcp.server import call_tool
 
         result = await call_tool("delete_device", {"device_id": 1})
-        assert "disabled" in result[0].text.lower() or "not enabled" in result[0].text.lower()
+        assert result.isError is True
+        text = result.content[0].text.lower()
+        assert "disabled" in text or "not enabled" in text
 
     @pytest.mark.asyncio
     async def test_enabled_tool_not_in_list_rejected(self, monkeypatch):
@@ -100,7 +102,9 @@ class TestCallToolRejection:
         from lm_mcp.server import call_tool
 
         result = await call_tool("delete_device", {"device_id": 1})
-        assert "not enabled" in result[0].text.lower() or "error" in result[0].text.lower()
+        assert result.isError is True
+        text = result.content[0].text.lower()
+        assert "not enabled" in text or "error" in text
 
 
 class TestCategoryFilter:
@@ -192,7 +196,8 @@ class TestCategoryFilter:
         reset_config()
         try:
             result = await call_tool("delete_device", {"device_id": 1})
-            assert "LM_MCP_CATEGORIES" in result[0].text
+            assert result.isError is True
+            assert "LM_MCP_CATEGORIES" in result.content[0].text
         finally:
             reset_config()
 

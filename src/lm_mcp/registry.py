@@ -1398,7 +1398,7 @@ TOOLS.extend(
                         "description": "End time in epoch seconds (optional)",
                     },
                 },
-                "required": ["website_id"],
+                "required": ["website_id", "checkpoint_id"],
             },
         ),
         Tool(
@@ -2465,6 +2465,10 @@ TOOLS.extend(
             inputSchema={
                 "type": "object",
                 "properties": {
+                    "admin_id": {
+                        "type": "integer",
+                        "description": "User ID whose tokens to list (omit for all tokens)",
+                    },
                     "limit": {"type": "integer", "default": 50, "description": "Max results"},
                 },
             },
@@ -2477,6 +2481,10 @@ TOOLS.extend(
                 "type": "object",
                 "properties": {
                     "token_id": {"type": "integer", "description": "API token ID"},
+                    "admin_id": {
+                        "type": "integer",
+                        "description": "Owning user ID (optional; looked up when omitted)",
+                    },
                 },
                 "required": ["token_id"],
             },

@@ -3530,6 +3530,10 @@
     "description": "Get details about a specific API token",
     "inputSchema": {
       "properties": {
+        "admin_id": {
+          "description": "Owning user ID (optional; looked up when omitted)",
+          "type": "integer"
+        },
         "token_id": {
           "description": "API token ID",
           "type": "integer"
@@ -3576,6 +3580,10 @@
     "description": "List API tokens",
     "inputSchema": {
       "properties": {
+        "admin_id": {
+          "description": "User ID whose tokens to list (omit for all tokens)",
+          "type": "integer"
+        },
         "limit": {
           "default": 50,
           "description": "Max results",
@@ -6981,7 +6989,8 @@
         }
       },
       "required": [
-        "website_id"
+        "website_id",
+        "checkpoint_id"
       ],
       "type": "object"
     }

@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING
 
 from mcp.types import TextContent
 
+from lm_mcp.exceptions import NotFoundError
 from lm_mcp.tools import format_response, handle_error
 
 if TYPE_CHECKING:
@@ -15,14 +16,14 @@ if TYPE_CHECKING:
 
 async def get_api_tokens(
     client: LogicMonitorClient,
-    admin_id: int,
+    admin_id: int | None = None,
     limit: int = 50,
 ) -> list[TextContent]:
-    """List API tokens for a specific user/admin.
+    """List API tokens for one user/admin, or across the portal when admin_id is omitted.
 
     Args:
         client: LogicMonitor API client.
-        admin_id: Admin/user ID to list tokens for.
+        admin_id: Admin/user ID to list tokens for. Omit to list every token in the portal.
         limit: Maximum number of tokens to return.
 
     Returns:
@@ -31,7 +32,12 @@ async def get_api_tokens(
     try:
         params: dict = {"size": limit}
 
-        result = await client.get(f"/setting/admins/{admin_id}/apitokens", params=params)
+        path = (
+            f"/setting/admins/{admin_id}/apitokens"
+            if admin_id is not None
+            else "/setting/admins/apitokens"
+        )
+        result = await client.get(path, params=params)
 
         tokens = []
         for item in result.get("items", []):
@@ -61,21 +67,30 @@ async def get_api_tokens(
 
 async def get_api_token(
     client: LogicMonitorClient,
-    admin_id: int,
     token_id: int,
+    admin_id: int | None = None,
 ) -> list[TextContent]:
     """Get detailed information about a specific API token.
 
     Args:
         client: LogicMonitor API client.
-        admin_id: Admin/user ID.
         token_id: API token ID.
+        admin_id: Owning admin/user ID. Omit to look the token up across the portal.
 
     Returns:
         List of TextContent with API token details or error.
     """
     try:
-        result = await client.get(f"/setting/admins/{admin_id}/apitokens/{token_id}")
+        if admin_id is not None:
+            result = await client.get(f"/setting/admins/{admin_id}/apitokens/{token_id}")
+        else:
+            listing = await client.get(
+                "/setting/admins/apitokens", params={"filter": f"id:{token_id}", "size": 1}
+            )
+            items = listing.get("items") or []
+            if not items:
+                raise NotFoundError(f"API token {token_id} not found")
+            result = items[0]
 
         token = {
             "id": result.get("id"),

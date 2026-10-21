@@ -7,7 +7,7 @@ import functools
 import json
 import logging
 from collections.abc import Callable
-from typing import Any, TypeVar
+from typing import Any, ClassVar, TypeVar
 
 from mcp.types import TextContent
 
@@ -18,9 +18,11 @@ logger = logging.getLogger(__name__)
 __all__ = [
     "SEVERITY_MAP",
     "SEVERITY_NAMES",
+    "ErrorContent",
     "call_sub_tool",
     "format_response",
     "handle_error",
+    "is_error_result",
     "normalize_definition_fields",
     "portal_url",
     "quote_filter_value",
@@ -234,6 +236,28 @@ async def resolve_group_filter(client: Any, group_id: int) -> str:
     return f"monitorObjectGroups~{quote_filter_value(full_path)}"
 
 
+class ErrorContent(TextContent):
+    """TextContent that carries a tool error.
+
+    The text keeps the ``Error: ...`` form callers read; the type is what lets the
+    dispatcher recognize a failure without parsing the text.
+    """
+
+    is_error: ClassVar[bool] = True
+
+
+def is_error_result(result: list) -> bool:
+    """Return True when a tool result carries an ErrorContent item.
+
+    Args:
+        result: The content list a tool handler or execute_tool returned.
+
+    Returns:
+        True if any item is an ErrorContent, False otherwise (including empty).
+    """
+    return any(isinstance(item, ErrorContent) for item in result)
+
+
 def format_response(data: Any) -> list[TextContent]:
     """Format data as MCP TextContent response.
 
@@ -241,14 +265,15 @@ def format_response(data: Any) -> list[TextContent]:
         data: The data to format. Can be dict, list, string, or other types.
 
     Returns:
-        List containing a single TextContent with the formatted data.
+        List containing a single TextContent with the formatted data; an
+        ErrorContent when the data is an error dict.
     """
     if isinstance(data, dict) and data.get("error"):
         # Error response - format for readability
         text = f"Error: {data['message']}"
         if data.get("suggestion"):
             text += f"\nSuggestion: {data['suggestion']}"
-        return [TextContent(type="text", text=text)]
+        return [ErrorContent(type="text", text=text)]
 
     # Success response
     text = json.dumps(data, indent=2, default=str) if isinstance(data, (dict, list)) else str(data)
@@ -263,7 +288,7 @@ def handle_error(error: Exception) -> list[TextContent]:
         error: The exception to handle.
 
     Returns:
-        List containing a single TextContent with the error details.
+        List containing a single ErrorContent with the error details.
     """
     if isinstance(error, LMError):
         return format_response(error.to_dict())

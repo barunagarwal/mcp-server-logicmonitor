@@ -2,10 +2,15 @@
 # Description: Validates tool filtering, write audit, and session recording.
 
 import json
+import logging
 from unittest.mock import AsyncMock, MagicMock, patch
 
+import httpx
 import pytest
-from mcp.types import TextContent
+import respx
+from mcp.types import CallToolRequest, CallToolRequestParams, CallToolResult, TextContent
+
+from lm_mcp.tools import ErrorContent, is_error_result
 
 
 class TestExecuteToolMiddleware:
@@ -113,26 +118,6 @@ class TestExecuteToolMiddleware:
             await execute_tool("create_device", {"name": "test"})
 
         mock_log.assert_called_once_with("create_device", {"name": "test"}, success=True)
-
-    @pytest.mark.asyncio
-    async def test_logs_write_operation_on_failure(self, monkeypatch):
-        """execute_tool logs failed write operations."""
-        monkeypatch.setenv("LM_PORTAL", "test.logicmonitor.com")
-        monkeypatch.setenv("LM_BEARER_TOKEN", "test-token")
-
-        failing_handler = AsyncMock(side_effect=Exception("API error"))
-
-        with (
-            patch("lm_mcp.server.get_tool_handler", return_value=failing_handler),
-            patch("lm_mcp.server.get_client", return_value=MagicMock()),
-            patch("lm_mcp.server.log_write_operation") as mock_log,
-        ):
-            from lm_mcp.server import execute_tool
-
-            result = await execute_tool("create_device", {"name": "test"})
-
-        mock_log.assert_called_once_with("create_device", {"name": "test"}, success=False)
-        assert "error" in result[0].text.lower()
 
     @pytest.mark.asyncio
     async def test_records_session_when_enabled(self, monkeypatch, mock_handler, mock_client):
@@ -318,3 +303,216 @@ class TestMultiPortalDispatch:
             assert history and history[-1].tool_name == "use_portal"
         finally:
             reset_session()
+
+
+DEVICE_URL = "https://test.logicmonitor.com/santaba/rest/device/devices/7"
+
+# Field types copied from a live GET /device/devices read (2026-10-20); the error
+# envelope copies the live 404 body shape with the 403 status.
+DEVICE_7 = {
+    "id": 7,
+    "name": "10.0.0.7",
+    "displayName": "web-07",
+    "deviceType": 0,
+    "currentCollectorId": 3,
+    "hostGroupIds": "2,14",
+    "hostStatus": "normal",
+}
+FORBIDDEN = {"errorMessage": "Permission denied", "errorCode": 1403, "errorDetail": None}
+
+
+@pytest.fixture
+def write_portal(monkeypatch, reset_portals):
+    """Single-portal env with writes on and a real client bound the way stdio binds it."""
+    monkeypatch.setenv("LM_PORTAL", "test.logicmonitor.com")
+    monkeypatch.setenv("LM_BEARER_TOKEN", "test-token")
+    monkeypatch.setenv("LM_ENABLE_WRITE_OPERATIONS", "true")
+    monkeypatch.delenv("LM_MULTI_PORTAL", raising=False)
+    monkeypatch.delenv("LM_SESSION_ENABLED", raising=False)
+
+    from lm_mcp.auth import create_auth_provider
+    from lm_mcp.client import LogicMonitorClient
+    from lm_mcp.config import get_config
+    from lm_mcp.server import _set_client
+
+    config = get_config()
+    _set_client(
+        LogicMonitorClient(
+            base_url=config.base_url,
+            auth=create_auth_provider(config),
+            timeout=config.timeout,
+            api_version=config.api_version,
+            max_retries=config.max_retries,
+            ingest_url=config.ingest_url,
+        )
+    )
+
+
+def _audit_lines(caplog) -> list[tuple[int, str]]:
+    return [(r.levelno, r.getMessage()) for r in caplog.records if r.name == "lm_mcp.audit"]
+
+
+class TestWriteOutcomeFromResult:
+    """Audit, session and isError derive from the real handler's result (R1.4)."""
+
+    @respx.mock
+    async def test_forbidden_delete_audits_failure(self, write_portal, caplog):
+        respx.get(DEVICE_URL).mock(return_value=httpx.Response(200, json=DEVICE_7))
+        respx.delete(DEVICE_URL).mock(return_value=httpx.Response(403, json=FORBIDDEN))
+        from lm_mcp.server import execute_tool
+
+        with caplog.at_level(logging.INFO, logger="lm_mcp.audit"):
+            result = await execute_tool("delete_device", {"device_id": 7})
+
+        assert isinstance(result[0], ErrorContent)
+        assert result[0].text.startswith("Error: Permission denied")
+        assert _audit_lines(caplog) == [
+            (logging.WARNING, "Write operation failed: delete_device args={'device_id': 7}")
+        ]
+
+    @respx.mock
+    async def test_write_disabled_refusal_audits_failure(self, write_portal, monkeypatch, caplog):
+        monkeypatch.setenv("LM_ENABLE_WRITE_OPERATIONS", "false")
+        from lm_mcp.config import reset_config
+        from lm_mcp.server import execute_tool
+
+        reset_config()
+        with caplog.at_level(logging.INFO, logger="lm_mcp.audit"):
+            result = await execute_tool("delete_device", {"device_id": 7})
+
+        assert isinstance(result[0], ErrorContent)
+        assert result[0].text.startswith("Error: Write operations are disabled")
+        assert not respx.calls
+        assert _audit_lines(caplog) == [
+            (logging.WARNING, "Write operation failed: delete_device args={'device_id': 7}")
+        ]
+
+    @respx.mock
+    async def test_successful_delete_audits_success(self, write_portal, caplog):
+        respx.get(DEVICE_URL).mock(return_value=httpx.Response(200, json=DEVICE_7))
+        respx.delete(DEVICE_URL).mock(return_value=httpx.Response(200, json={}))
+        from lm_mcp.server import execute_tool
+
+        with caplog.at_level(logging.INFO, logger="lm_mcp.audit"):
+            result = await execute_tool("delete_device", {"device_id": 7})
+
+        assert not is_error_result(result)
+        assert json.loads(result[0].text)["success"] is True
+        assert _audit_lines(caplog) == [
+            (logging.INFO, "Write operation: delete_device args={'device_id': 7}")
+        ]
+
+    async def test_write_raising_before_handler_audits_failure(self, write_portal, caplog):
+        """No client bound: get_client raises and the except path audits the write as failed."""
+        from lm_mcp.server import _set_client, execute_tool
+
+        _set_client(None)
+        with caplog.at_level(logging.INFO, logger="lm_mcp.audit"):
+            result = await execute_tool("delete_device", {"device_id": 7})
+
+        assert result[0].text == "Error executing delete_device: Client not initialized"
+        assert _audit_lines(caplog) == [
+            (logging.WARNING, "Write operation failed: delete_device args={'device_id': 7}")
+        ]
+
+    async def test_write_value_error_audits_failure(self, write_portal, caplog):
+        """An unknown write-prefixed tool raises ValueError in lookup; it audits as failed."""
+        from lm_mcp.server import execute_tool
+
+        with caplog.at_level(logging.INFO, logger="lm_mcp.audit"):
+            result = await execute_tool("delete_no_such_resource", {"id": 7})
+
+        assert is_error_result(result)
+        assert result[0].text.startswith("Error: ")
+        assert _audit_lines(caplog) == [
+            (logging.WARNING, "Write operation failed: delete_no_such_resource args={'id': 7}")
+        ]
+
+    @respx.mock
+    async def test_forbidden_delete_recorded_as_failure_in_session(self, write_portal, monkeypatch):
+        monkeypatch.setenv("LM_SESSION_ENABLED", "true")
+        respx.get(DEVICE_URL).mock(return_value=httpx.Response(200, json=DEVICE_7))
+        respx.delete(DEVICE_URL).mock(return_value=httpx.Response(403, json=FORBIDDEN))
+        from lm_mcp.config import reset_config
+        from lm_mcp.server import execute_tool
+        from lm_mcp.session import get_session, reset_session
+
+        reset_config()
+        reset_session()
+        try:
+            await execute_tool("delete_device", {"device_id": 7})
+            entry = get_session().history[-1]
+            assert entry.tool_name == "delete_device"
+            assert entry.success is False
+        finally:
+            reset_session()
+
+    @pytest.mark.parametrize(
+        ("content", "expected"),
+        [
+            (TextContent(type="text", text="plain text, not JSON"), True),
+            (ErrorContent(type="text", text='{"error": true, "message": "x"}'), False),
+        ],
+        ids=["plain-text-success", "json-text-error"],
+    )
+    async def test_session_outcome_follows_result_type_not_json(
+        self, write_portal, monkeypatch, content, expected
+    ):
+        """Session success comes from the result type, whether or not the text parses."""
+        monkeypatch.setenv("LM_SESSION_ENABLED", "true")
+        from lm_mcp.config import reset_config
+        from lm_mcp.server import execute_tool
+        from lm_mcp.session import get_session, reset_session
+
+        reset_config()
+        reset_session()
+        try:
+            with patch(
+                "lm_mcp.server.get_tool_handler", return_value=AsyncMock(return_value=[content])
+            ):
+                await execute_tool("get_devices", {})
+            assert get_session().history[-1].success is expected
+        finally:
+            reset_session()
+
+    @respx.mock
+    async def test_call_tool_marks_failure_is_error(self, write_portal):
+        respx.get(DEVICE_URL).mock(return_value=httpx.Response(200, json=DEVICE_7))
+        respx.delete(DEVICE_URL).mock(return_value=httpx.Response(403, json=FORBIDDEN))
+        from lm_mcp.server import call_tool
+
+        result = await call_tool("delete_device", {"device_id": 7})
+
+        assert isinstance(result, CallToolResult)
+        assert result.isError is True
+        assert result.content[0].text.startswith("Error: Permission denied")
+
+    @respx.mock
+    async def test_call_tool_success_is_plain_content(self, write_portal):
+        respx.get(DEVICE_URL).mock(return_value=httpx.Response(200, json=DEVICE_7))
+        respx.delete(DEVICE_URL).mock(return_value=httpx.Response(200, json={}))
+        from lm_mcp.server import call_tool
+
+        result = await call_tool("delete_device", {"device_id": 7})
+
+        assert isinstance(result, list)
+        assert json.loads(result[0].text)["success"] is True
+
+    @respx.mock
+    async def test_sdk_request_handler_reports_is_error(self, write_portal):
+        """The registered MCP CallToolRequest handler carries isError to the wire result."""
+        respx.get(DEVICE_URL).mock(return_value=httpx.Response(200, json=DEVICE_7))
+        respx.delete(DEVICE_URL).mock(return_value=httpx.Response(403, json=FORBIDDEN))
+        from lm_mcp.server import server
+
+        handler = server.request_handlers[CallToolRequest]
+        response = await handler(
+            CallToolRequest(
+                method="tools/call",
+                params=CallToolRequestParams(name="delete_device", arguments={"device_id": 7}),
+            )
+        )
+
+        wire = response.model_dump(by_alias=True, exclude_none=True)
+        assert wire["isError"] is True
+        assert wire["content"][0]["text"].startswith("Error: Permission denied")
