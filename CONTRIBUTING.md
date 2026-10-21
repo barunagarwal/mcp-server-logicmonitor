@@ -8,8 +8,8 @@ request, review, merge.
 1. Fork the repository and create a branch from `main`.
 2. Make your change, with tests.
 3. Open a pull request against `main`.
-4. CI runs the suite on Python 3.11, 3.12, and 3.13, plus lint and a build. All
-   checks must pass.
+4. CI runs the suite on Python 3.11, 3.12, and 3.13, plus lint, the mypy
+   ratchet, and a build. All checks must pass.
 5. The maintainer reviews. `main` is protected: every change needs an approving
    review from the code owner, and direct pushes are rejected.
 6. Merges are squash-only, and the branch is deleted afterward.
@@ -25,8 +25,13 @@ uv run pre-commit install     # once: runs lint and format on every commit
 uv run pytest                 # full suite
 uv run ruff check src tests   # lint
 uv run ruff format src tests  # format (CI checks this)
-uv run mypy src/lm_mcp --ignore-missing-imports
+uv run python scripts/mypy_ratchet.py   # type check against mypy-baseline.txt
 ```
+
+mypy runs as a ratchet. `mypy-baseline.txt` holds the current error count, and
+CI fails when `uv run python scripts/mypy_ratchet.py` finds more. A change that
+fixes type errors should lower the baseline: run
+`uv run python scripts/mypy_ratchet.py --write` and commit the file with the fix.
 
 The pre-commit hooks mirror the blocking CI gates (ruff check, ruff format, plus
 file hygiene and a private-key guard), so formatting drift fails locally instead
