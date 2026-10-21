@@ -35,12 +35,16 @@ spec:
     spec:
       securityContext:
         runAsNonRoot: true
+        # The UID the image creates and runs as (deploy/Dockerfile).
+        runAsUser: 10001
+        runAsGroup: 10001
         seccompProfile:
           type: RuntimeDefault
       containers:
         - name: mcp-server-logicmonitor
-          # Pin a release tag (for example :v4.2.0) for reproducible rollouts.
-          image: ghcr.io/ryanmat/mcp-server-logicmonitor:latest
+          # A release tag, as the release workflow pushes it (no "v" prefix).
+          # Move it with each release rather than tracking :latest.
+          image: ghcr.io/ryanmat/mcp-server-logicmonitor:4.2.1
           imagePullPolicy: IfNotPresent
           ports:
             - containerPort: 8080
@@ -75,6 +79,11 @@ spec:
               value: "false"
             - name: LM_LOG_LEVEL
               value: warning
+            # The root filesystem is read-only; /tmp is the writable emptyDir below.
+            # Point TF_WORKSPACE_DIR or a session persistence file under it, or
+            # mount a volume of their own.
+            - name: TMPDIR
+              value: /tmp
           # Probe paths are exempt from inbound auth by design.
           livenessProbe:
             httpGet:
@@ -103,6 +112,12 @@ spec:
             capabilities:
               drop:
                 - ALL
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: tmp
+          emptyDir: {}
 ---
 apiVersion: v1
 kind: Service

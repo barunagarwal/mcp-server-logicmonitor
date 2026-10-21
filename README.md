@@ -70,7 +70,20 @@ You should see: `logicmonitor: uvx --from lm-mcp lm-mcp-server - ✓ Connected`
 "Show me all critical alerts in LogicMonitor"
 ```
 
-## What's New in v4.2.0
+## What's New in v4.2.1
+
+A fix release. LMv1 portals authenticate again, writes included: the signature
+follows LogicMonitor's documented recipe and covers the exact bytes sent. Tool
+errors reach the client with `isError: true` and are audited as failures, every
+tool is callable per its own schema, stdio starts in every configuration, and
+`/readyz` no longer calls the portal. Releases are now gated on the suite across
+Python 3.11 to 3.13, and the container installs from `uv.lock` with hash
+checking, digest-pinned base images, and a fixed non-root UID.
+
+<details>
+<summary>v4.2.0</summary>
+
+### What's New in v4.2.0
 
 Multi-portal mode arrives, hardened. A single server can now serve many customer
 portals, selecting the active one at runtime with `list_portals`, `use_portal`,
@@ -80,6 +93,8 @@ age-encrypted vault, every portal is read-only unless its vault record says
 otherwise, and the mode is deliberately stdio-only: the server refuses to start
 it on the shared HTTP transport. The release also carries a full dependency
 refresh clearing 53 dependabot alerts across the lockfile.
+
+</details>
 
 <details>
 <summary>v4.1.0</summary>

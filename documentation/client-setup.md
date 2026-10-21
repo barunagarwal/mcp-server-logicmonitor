@@ -72,7 +72,7 @@ To enable write operations and ingestion APIs:
 
 Then restart Cursor or enable the server in **Cursor Settings** → **MCP**.
 
-**Cursor's 40-tool cap (recommended for v3.6.0+):** Cursor only loads the first 40 MCP tools — the remaining ~240 are invisible to the agent. Use `LM_MCP_CATEGORIES` to fit a curated subset under the cap. The `workflow` category alone (`triage`, `diagnose`, `health_check`, `portal_overview`, `capacity_plan`, scoring/correlation tools, plus `update_logicmodule`) is roughly 23 tools and covers the 80% case:
+**Cursor's 40-tool cap (recommended for v3.6.0+):** Cursor only loads the first 40 MCP tools — the rest are invisible to the agent. Use `LM_MCP_CATEGORIES` to fit a curated subset under the cap. The `workflow` category alone (`triage`, `diagnose`, `health_check`, `portal_overview`, `capacity_plan`, scoring/correlation tools, plus `update_logicmodule`) is roughly 23 tools and covers the 80% case:
 
 ```json
 {
@@ -101,7 +101,7 @@ For surgical control, combine with `LM_ENABLED_TOOLS`:
 }
 ```
 
-The two filters compose by intersection: `LM_MCP_CATEGORIES` only narrows further, never expands. Default behavior (env var unset) returns all 280 tools — backwards compatible.
+The two filters compose by intersection: `LM_MCP_CATEGORIES` only narrows further, never expands. Default behavior (env var unset) returns all 306 tools — backwards compatible.
 
 ### Claude Desktop
 

@@ -1,7 +1,22 @@
 # Description: Foundation tests verifying all core modules work together.
 # Description: Tests package exports, configuration instantiation, and exception handling.
 
+import json
+import re
+import tomllib
+from pathlib import Path
+
 import pytest
+
+REPO_ROOT = Path(__file__).parent.parent
+# A stated total ("306 tools", "306 structured tools", "**306 Tools**"); smaller numbers
+# before "tools" describe subsets, such as a category or a client's cap.
+_TOOL_TOTAL_RE = re.compile(r"\b(\d{3})\s+(?:structured\s+)?tools\b", re.IGNORECASE)
+_TOOL_BREAKDOWN_RE = re.compile(r"\((\d+) LM \+ (\d+) AAP \+ (\d+) Terraform \+ (\d+) watsonx\)")
+
+
+def _project_version() -> str:
+    return tomllib.loads((REPO_ROOT / "pyproject.toml").read_text())["project"]["version"]
 
 
 class TestPackageExports:
@@ -47,6 +62,42 @@ class TestPackageExports:
         assert RateLimitError is not None
         assert ServerError is not None
         assert LMConnectionError is not None
+
+
+class TestReleaseMetadata:
+    """R1.7: the published manifests and the docs agree with the package they describe."""
+
+    def test_server_json_versions_match_pyproject(self):
+        """Both server.json version fields carry pyproject.toml's version.
+
+        The MCP registry reads server.json, so a bump that misses it advertises the
+        previous release.
+        """
+        server = json.loads((REPO_ROOT / "server.json").read_text())
+
+        assert server["version"] == _project_version()
+        assert [package["version"] for package in server["packages"]] == [_project_version()]
+
+    @pytest.mark.parametrize("doc", ["README.md", "documentation/client-setup.md", "server.json"])
+    def test_docs_state_the_registry_tool_count(self, doc):
+        """Every total tool count a doc or the registry manifest states is the registry's."""
+        from lm_mcp.registry import AWX_TOOLS, TF_TOOLS, TOOLS, WATSONX_TOOLS
+
+        total = len(TOOLS) + len(AWX_TOOLS) + len(WATSONX_TOOLS) + len(TF_TOOLS)
+        stated = [int(n) for n in _TOOL_TOTAL_RE.findall((REPO_ROOT / doc).read_text())]
+
+        assert stated, f"{doc} states no tool count"
+        assert set(stated) == {total}, f"{doc} states {sorted(set(stated))}, registry has {total}"
+
+    def test_readme_tool_breakdown_matches_the_registry(self):
+        """The README's per-integration breakdown matches each registry list."""
+        from lm_mcp.registry import AWX_TOOLS, TF_TOOLS, TOOLS, WATSONX_TOOLS
+
+        match = _TOOL_BREAKDOWN_RE.search((REPO_ROOT / "README.md").read_text())
+
+        assert match, "README.md has no (LM + AAP + Terraform + watsonx) tool breakdown"
+        counts = (len(TOOLS), len(AWX_TOOLS), len(TF_TOOLS), len(WATSONX_TOOLS))
+        assert tuple(int(n) for n in match.groups()) == counts
 
 
 class TestFoundationIntegration:

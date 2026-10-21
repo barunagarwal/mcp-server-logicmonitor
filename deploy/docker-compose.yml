@@ -30,7 +30,7 @@ services:
       - LM_SESSION_ENABLED=${LM_SESSION_ENABLED:-true}
       - LM_FIELD_VALIDATION=${LM_FIELD_VALIDATION:-warn}
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8080/healthz"]
+      test: ["CMD", "python", "-c", "import os, sys, urllib.request; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:%s/healthz' % os.environ.get('LM_HTTP_PORT', '8080'), timeout=5).status == 200 else 1)"]
       interval: 30s
       timeout: 10s
       retries: 3
@@ -42,7 +42,8 @@ services:
   # Optional: TLS termination with Caddy
   # Enable with: docker compose --profile tls up
   caddy:
-    image: caddy:2-alpine
+    # caddy:2.11-alpine (2.11.7), digest read from Docker Hub 2026-10-21
+    image: caddy:2.11-alpine@sha256:d8542f48d34a9cf4e4c11a478865229840e87e4c96ea3f439101f31a5d35f75f
     container_name: lm-mcp-proxy
     ports:
       - "443:443"

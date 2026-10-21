@@ -3,6 +3,8 @@
 
 import json
 import logging
+import tomllib
+from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import httpx
@@ -516,3 +518,20 @@ class TestWriteOutcomeFromResult:
         wire = response.model_dump(by_alias=True, exclude_none=True)
         assert wire["isError"] is True
         assert wire["content"][0]["text"].startswith("Error: Permission denied")
+
+    def test_mcp_floor_admits_only_call_tool_result_passthrough(self):
+        """The mcp requirement excludes every release that cannot pass a CallToolResult.
+
+        call_tool returns CallToolResult(isError=True) for an error. mcp 1.19.0 is the first
+        lowlevel server that passes one through; 1.18.0 and earlier list() it, fail
+        validation, and send a pydantic message in place of the tool's error text.
+        """
+        from packaging.requirements import Requirement
+        from packaging.version import Version
+
+        pyproject = Path(__file__).parent.parent / "pyproject.toml"
+        dependencies = tomllib.loads(pyproject.read_text())["project"]["dependencies"]
+        mcp = next(r for r in map(Requirement, dependencies) if r.name == "mcp")
+
+        assert Version("1.18.0") not in mcp.specifier
+        assert Version("1.19.0") in mcp.specifier

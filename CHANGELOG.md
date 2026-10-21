@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [4.2.1] - 2026-10-21
+
 ### Fixed
 
 - LMv1 authentication: the signature is now base64 of the **hex** HMAC-SHA256 digest, as
@@ -14,6 +16,49 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   portal configured with `LM_ACCESS_ID`/`LM_ACCESS_KEY` failed to authenticate; bearer-token
   portals were unaffected. The tests now check a fixed reference vector computed with LM's
   recipe.
+- LMv1 request bodies: `request()` and `ingest_post()` serialize a JSON body once
+  and send those exact bytes, so the signature covers what goes on the wire. The
+  signature was computed over `json.dumps` with default separators while httpx sent
+  compact JSON, so every POST, PUT and PATCH with a body failed with 401 on LMv1
+  portals.
+- Stdio no longer fails at startup with `UnboundLocalError` when `LM_MULTI_PORTAL`
+  and `TF_WORKSPACE_DIR` are both set: `logging` is imported at module scope.
+- `/readyz` no longer calls the LogicMonitor API. With
+  `LM_HEALTH_CHECK_CONNECTIVITY` on it ran the connectivity check on every probe,
+  although the result could never change its answer, so an unauthenticated caller
+  could drive portal traffic (#56).
+- `LM_MAX_RETRIES` is honored on both transports. Stdio and HTTP built the
+  single-portal client with the default of 3 whatever the setting.
+- `get_api_tokens` and `get_api_token` were uncallable: their handlers required an
+  `admin_id` that neither schema declared. `admin_id` is now optional and declared
+  in both; omitted, tokens list portal-wide and a token resolves by id
+  (`filter=id:<id>`), and an unknown id returns `NOT_FOUND`. `get_website_data`'s
+  schema marks `checkpoint_id` required, as the handler always did. A test holds
+  every tool's schema to its handler signature.
+- Tool errors are reported as errors. Error results carry a type (`ErrorContent`),
+  `call_tool` returns them as `CallToolResult(isError=True)`, and the write audit
+  log and session history take success from the result. A 403 on a write, or a
+  refusal with writes disabled, was audited as `success=True`. The text of every
+  error is unchanged.
+- The `mcp` floor is 1.19.0, the first release whose low-level server passes a
+  `CallToolResult` through; with 1.18 and earlier a tool error reached the client
+  as a pydantic validation message instead of its text.
+- Configuration validation errors no longer echo the rejected value, which
+  previously put a too-short `LM_HTTP_AUTH_TOKEN` or `LM_BEARER_TOKEN` into the
+  startup traceback, container logs, and the health endpoint's response body.
+- `lm_mcp.__version__` synced to the release version (the published 4.2.0 wheel
+  self-reports "4.1.0" at the HTTP root endpoint); the foundation test now
+  asserts `__version__` against the installed package metadata so a bump that
+  misses `__init__.py` fails the suite instead of shipping.
+- HTTP transport `tools/list` now includes the Terraform tools when a Terraform
+  runner is configured. They were dispatchable over HTTP but invisible to HTTP
+  clients, unlike stdio which listed them correctly.
+- Documentation: removed the `LM_ANALYSIS_TTL_MINUTES` row from the README
+  (not a config field), corrected the `LM_CORS_ORIGINS` default, and dropped a
+  `.gitignore` negation for a file that does not exist.
+- `server.json`'s version fields are held to `pyproject.toml` by a test, and the
+  README and `documentation/client-setup.md` are held to the registry's tool count
+  (306); the client setup guide said 280.
 
 ### Added
 
@@ -53,22 +98,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   origin list rather than restoring `*`: CORS runs with
   `allow_credentials=true`, so a wildcard lets any site a browser visits call
   `/mcp` with the visitor's credentials.
-
-### Fixed
-
-- Configuration validation errors no longer echo the rejected value, which
-  previously put a too-short `LM_HTTP_AUTH_TOKEN` or `LM_BEARER_TOKEN` into the
-  startup traceback, container logs, and the health endpoint's response body.
-- `lm_mcp.__version__` synced to the release version (the published 4.2.0 wheel
-  self-reports "4.1.0" at the HTTP root endpoint); the foundation test now
-  asserts `__version__` against the installed package metadata so a bump that
-  misses `__init__.py` fails the suite instead of shipping.
-- HTTP transport `tools/list` now includes the Terraform tools when a Terraform
-  runner is configured. They were dispatchable over HTTP but invisible to HTTP
-  clients, unlike stdio which listed them correctly.
-- Documentation: removed the `LM_ANALYSIS_TTL_MINUTES` row from the README
-  (not a config field), corrected the `LM_CORS_ORIGINS` default, and dropped a
-  `.gitignore` negation for a file that does not exist.
+- With `LM_HEALTH_CHECK_CONNECTIVITY` on, `/health` runs the connectivity check
+  only for callers that present `LM_HTTP_AUTH_TOKEN`, or when no token is
+  configured; an unauthenticated probe gets the local checks only.
+- CI runs each matrix leg on the Python it names (every leg ran 3.11), installs
+  from `uv.lock` with `--locked`, pins every action to a commit SHA, and runs with
+  a read-only token. A new job installs the `huggingface` extra with CPU torch and
+  runs its tests. Dependabot covers uv, GitHub Actions and Docker weekly.
+- Releases are gated. A tag must be on `main` and match `pyproject.toml`, both
+  `server.json` versions, `lm_mcp.__version__` and a CHANGELOG section
+  (`scripts/check_release_tag.py`), and lint, the format check, the suite on
+  Python 3.11 to 3.13 and the generated files must pass before PyPI publishes; the
+  container and the GitHub release wait for PyPI.
+- mypy is a ratchet: CI fails when the error count rises above
+  `mypy-baseline.txt`, in place of a step that could not fail.
+- The container installs from `uv.lock` with `pip --require-hashes`, pins its base
+  images by digest, drops `uv` and `curl` from the runtime image (the healthcheck
+  runs on Python), and runs as UID 10001. `deploy/k8s/deployment.yaml` sets
+  `runAsUser` and `runAsGroup` to 10001, pins image `4.2.1` in place of `latest`,
+  and mounts an `emptyDir` at `/tmp` under its read-only root; compose uses the
+  Python healthcheck and a digest-pinned Caddy.
 
 ## [4.2.0] - 2026-08-11
 
