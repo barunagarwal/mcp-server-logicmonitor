@@ -75,6 +75,8 @@ class LMConfig(BaseSettings):
         LM_TIMEOUT: Request timeout in seconds (default: 30, range: 5-300)
         LM_ENABLE_WRITE_OPERATIONS: Enable write operations (default: false)
         LM_MAX_RETRIES: Max retry attempts for rate limits (default: 3, range: 0-10)
+        LM_RETRY_AFTER_CAP_SECONDS: Longest wait a server's Retry-After can impose
+            between retries (default: 120)
         LM_TRANSPORT: Transport mode - stdio or http (default: stdio)
         LM_MULTI_PORTAL: Serve many customer portals from one server, selected at
             runtime via use_portal (default: false; stdio-only)
@@ -125,6 +127,7 @@ class LMConfig(BaseSettings):
     timeout: int = 30
     enable_write_operations: bool = False
     max_retries: int = 3
+    retry_after_cap_seconds: int = 120
 
     # Multi-portal settings (one server serving many customer portals)
     multi_portal: bool = False
@@ -205,6 +208,14 @@ class LMConfig(BaseSettings):
             raise ValueError("max_retries must be non-negative")
         if v > 10:
             raise ValueError("max_retries must not exceed 10")
+        return v
+
+    @field_validator("retry_after_cap_seconds", mode="after")
+    @classmethod
+    def validate_retry_after_cap(cls, v: int) -> int:
+        """Validate retry_after_cap_seconds is non-negative."""
+        if v < 0:
+            raise ValueError("retry_after_cap_seconds must be non-negative")
         return v
 
     @field_validator("http_port", mode="after")

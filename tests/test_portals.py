@@ -57,6 +57,19 @@ def test_activate_sets_active_and_installs_client(tmp_path, monkeypatch, reset_p
     assert server.get_client() is not None
 
 
+def test_activated_client_uses_configured_retry_settings(tmp_path, monkeypatch, reset_portals):
+    """R3.5: a portal's client gets LM_MAX_RETRIES and LM_RETRY_AFTER_CAP_SECONDS."""
+    vault = _vault(tmp_path, {"acme": {"portal": "acme.example.com", "bearer_token": "tok"}})
+    _multi(monkeypatch, vault)
+    monkeypatch.setenv("LM_MAX_RETRIES", "5")
+    monkeypatch.setenv("LM_RETRY_AFTER_CAP_SECONDS", "45")
+
+    portals.activate("acme")
+
+    assert server.get_client().max_retries == 5
+    assert server.get_client().retry_after_cap == 45
+
+
 def test_activate_unknown_portal_raises(tmp_path, monkeypatch, reset_portals):
     vault = _vault(tmp_path, {"acme": {"portal": "acme.example.com", "bearer_token": "tok"}})
     _multi(monkeypatch, vault)

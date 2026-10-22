@@ -320,7 +320,7 @@ class TestHttpServerClientConstruction:
     """create_http_server builds the LM client from configuration."""
 
     async def test_http_client_uses_configured_max_retries(self, monkeypatch, reset_portals):
-        """R1.6: the HTTP transport's client gets LM_MAX_RETRIES, not the default."""
+        """R1.6, R3.5: the HTTP client gets LM_MAX_RETRIES and LM_RETRY_AFTER_CAP_SECONDS."""
         from unittest.mock import AsyncMock
 
         import uvicorn
@@ -335,6 +335,7 @@ class TestHttpServerClientConstruction:
         monkeypatch.setenv("LM_TRANSPORT", "http")
         monkeypatch.setenv("LM_HTTP_HOST", "127.0.0.1")
         monkeypatch.setenv("LM_MAX_RETRIES", "7")
+        monkeypatch.setenv("LM_RETRY_AFTER_CAP_SECONDS", "45")
         monkeypatch.setattr("lm_mcp.hf_config.get_hf_config", lambda: None)
         # Shutdown closes the client, so read it while the server is "serving".
         serving_clients = []
@@ -345,3 +346,4 @@ class TestHttpServerClientConstruction:
 
         serve.assert_awaited_once()
         assert serving_clients[0].max_retries == 7
+        assert serving_clients[0].retry_after_cap == 45

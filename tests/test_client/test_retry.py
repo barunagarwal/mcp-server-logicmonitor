@@ -10,6 +10,16 @@ from lm_mcp.client import LogicMonitorClient
 from lm_mcp.exceptions import RateLimitError
 
 
+@pytest.fixture(autouse=True)
+def no_sleep(monkeypatch):
+    """Skip backoff waits; Retry-After can now lengthen them to tens of seconds."""
+
+    async def fake_sleep(seconds):
+        return None
+
+    monkeypatch.setattr("lm_mcp.client.api.asyncio.sleep", fake_sleep)
+
+
 @pytest.fixture
 def auth():
     """Create a BearerAuth instance for testing."""
@@ -166,3 +176,18 @@ class TestRetryConfig:
 
         config = LMConfig()
         assert config.max_retries == 3
+
+    def test_retry_after_cap_loaded_and_validated(self, monkeypatch):
+        """LM_RETRY_AFTER_CAP_SECONDS is read from the environment; negatives are refused."""
+        import pydantic
+
+        from lm_mcp.config import LMConfig
+
+        monkeypatch.setenv("LM_PORTAL", "test.logicmonitor.com")
+        monkeypatch.setenv("LM_BEARER_TOKEN", "test-token")
+        monkeypatch.setenv("LM_RETRY_AFTER_CAP_SECONDS", "30")
+        assert LMConfig().retry_after_cap_seconds == 30
+
+        monkeypatch.setenv("LM_RETRY_AFTER_CAP_SECONDS", "-1")
+        with pytest.raises(pydantic.ValidationError, match="retry_after_cap_seconds"):
+            LMConfig()

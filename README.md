@@ -311,7 +311,7 @@ Skills ship with the repo — clone it and invoke `/lm-triage` in Claude Code to
 ### Operational Features
 - **Security-First**: Read-only by default, write operations require explicit opt-in
 - **Rate Limit Handling**: Automatic retry with exponential backoff and jitter
-- **Server Error Recovery**: Automatic retry on 5xx server errors
+- **Server Error Recovery**: Automatic retry on 5xx server errors for idempotent requests (GET, PUT, DELETE); a POST or PATCH that gets a 5xx is not resent, since the server may already have applied it. Timeouts and dropped connections are reported, not resent
 - **Pagination Support**: Handle large result sets with offset-based pagination
 - **Session Persistence**: Optional file-backed session variables that survive restarts
 
@@ -383,7 +383,8 @@ documented at the top of the file.
 | `LM_ENABLE_WRITE_OPERATIONS` | No | `false` | Enable write operations (create, update, delete) |
 | `LM_API_VERSION` | No | `3` | API version |
 | `LM_TIMEOUT` | No | `30` | Request timeout in seconds (range: 5-300) |
-| `LM_MAX_RETRIES` | No | `3` | Max retries for rate-limited/server error requests (range: 0-10) |
+| `LM_MAX_RETRIES` | No | `3` | Max retries for rate-limited requests, and for server errors on idempotent requests (GET, PUT, DELETE); a POST or PATCH that gets a 5xx is not resent (range: 0-10) |
+| `LM_RETRY_AFTER_CAP_SECONDS` | No | `120` | Longest wait between retries. A server's `Retry-After` can lengthen the backoff up to this cap, never shorten it |
 | `LM_TRANSPORT` | No | `stdio` | Transport mode: `stdio` (local) or `http` (remote) |
 | `LM_MULTI_PORTAL` | No | `false` | Serve many customer portals from one server, selected at runtime via `use_portal`. Stdio-only. |
 | `LM_VAULT_FILE` | No | - | Path to the age-encrypted portal vault (multi-portal) |
@@ -408,7 +409,7 @@ documented at the top of the file.
 | `AWX_TOKEN` | No | - | AAP personal access token |
 | `AWX_VERIFY_SSL` | No | `true` | Verify SSL certificates for AAP connections |
 | `AWX_TIMEOUT` | No | `30` | Request timeout in seconds for AAP API calls |
-| `AWX_MAX_RETRIES` | No | `3` | Max retries for failed AAP API requests |
+| `AWX_MAX_RETRIES` | No | `3` | Max retries for rate-limited AAP requests, and for server errors on idempotent ones; a job launch that gets a 5xx is not resent. A `Retry-After` lengthens the backoff up to 120 seconds |
 | `WATSONX_API_KEY` | No | - | IBM Cloud API key for watsonx.ai (enables Granite TTM + NL summaries) |
 | `WATSONX_URL` | No | `https://us-south.ml.cloud.ibm.com` | IBM watsonx.ai endpoint URL |
 | `WATSONX_PROJECT_ID` | No | - | IBM watsonx.ai project ID |

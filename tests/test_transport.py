@@ -302,10 +302,11 @@ class TestRunStdioStartup:
         assert any("HuggingFace fallback disabled" in r.getMessage() for r in caplog.records)
 
     async def test_single_portal_client_uses_configured_max_retries(self, monkeypatch):
-        """R1.6: the single-portal client is built with LM_MAX_RETRIES, not the default."""
+        """R1.6, R3.5: the client gets LM_MAX_RETRIES and LM_RETRY_AFTER_CAP_SECONDS."""
         from lm_mcp import server as server_module
 
         monkeypatch.setenv("LM_MAX_RETRIES", "7")
+        monkeypatch.setenv("LM_RETRY_AFTER_CAP_SECONDS", "45")
         # Shutdown nulls the global client, so read it while the loop is serving.
         serving_clients = []
         self.serve.side_effect = lambda *args: serving_clients.append(server_module._client)
@@ -315,3 +316,4 @@ class TestRunStdioStartup:
         self.serve.assert_awaited_once()
         assert serving_clients[0] is not None
         assert serving_clients[0].max_retries == 7
+        assert serving_clients[0].retry_after_cap == 45

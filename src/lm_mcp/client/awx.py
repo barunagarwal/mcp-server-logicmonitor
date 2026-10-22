@@ -5,14 +5,20 @@ from __future__ import annotations
 
 import asyncio
 import json
-import random
 import time
 
 import httpx
 
+from lm_mcp.client._retry import (
+    DEFAULT_RETRY_AFTER_CAP,
+    TRANSPORT_ERRORS,
+    backoff,
+    retry_after_seconds,
+    should_retry,
+    transport_error,
+)
 from lm_mcp.exceptions import (
     AuthenticationError,
-    LMConnectionError,
     LMError,
     LMPermissionError,
     NotFoundError,
@@ -154,8 +160,8 @@ class AwxClient:
     ) -> dict:
         """Make an authenticated request to the AWX API with retry.
 
-        Implements exponential backoff for rate-limited (429) and server
-        error (5xx) responses.
+        Retries a 429 for any method and a 5xx only for idempotent methods,
+        with exponential backoff; transport failures are not resent.
 
         Args:
             method: HTTP method (GET, POST, DELETE).
@@ -191,17 +197,15 @@ class AwxClient:
                     json=json_body,
                     headers=headers,
                 )
-            except httpx.ConnectError as e:
-                raise LMConnectionError(f"Failed to connect to AWX at {self.base_url}: {e}") from e
+            except TRANSPORT_ERRORS as e:
+                raise transport_error(e, "AWX", method, url) from e
 
-            # Retry on rate limit (429) or server errors (5xx)
-            if response.status_code == 429 or response.status_code >= 500:
+            # Retry 429 for any method and 5xx only for idempotent ones
+            if should_retry(method, response.status_code):
                 last_message = self._parse_error_response(response)
                 if attempt < self.max_retries:
-                    base_backoff = 2**attempt
-                    jitter = random.uniform(0, 0.5 * base_backoff)
-                    wait_time = base_backoff + jitter
-                    await asyncio.sleep(wait_time)
+                    wait = backoff(attempt, retry_after_seconds(response), DEFAULT_RETRY_AFTER_CAP)
+                    await asyncio.sleep(wait)
                     continue
 
             # Handle error responses

@@ -297,6 +297,77 @@ class TestAwxClientRetry:
             await client.get("/job_templates/")
 
 
+class TestAwxRetryPolicy:
+    """R3.5: AWX follows the LM client's rule; a launch that got a 5xx is not resent."""
+
+    @pytest.fixture
+    def waits(self, monkeypatch):
+        recorded: list[float] = []
+
+        async def fake_sleep(seconds):
+            recorded.append(seconds)
+
+        monkeypatch.setattr("lm_mcp.client.awx.asyncio.sleep", fake_sleep)
+        return recorded
+
+    @pytest.mark.asyncio
+    @respx.mock
+    async def test_launch_502_is_not_retried(self, waits):
+        """A 502 on a launch may follow a started job, so the launch is sent once."""
+        client = AwxClient(base_url=AWX_BASE, token="test-token", max_retries=2)
+        route = respx.post(f"{AWX_API}/job_templates/1/launch/").mock(
+            return_value=Response(502, json={"detail": "Bad gateway"})
+        )
+        with pytest.raises(ServerError):
+            await client.post("/job_templates/1/launch/", json_body={})
+        assert route.call_count == 1
+        assert waits == []
+
+    @pytest.mark.asyncio
+    @respx.mock
+    async def test_launch_429_is_retried(self, waits):
+        """A throttled launch was refused unprocessed, so it is sent again."""
+        client = AwxClient(base_url=AWX_BASE, token="test-token", max_retries=2)
+        route = respx.post(f"{AWX_API}/job_templates/1/launch/").mock(
+            side_effect=[
+                Response(429, json={"detail": "Throttled"}),
+                Response(201, json={"job": 7}),
+            ]
+        )
+        result = await client.post("/job_templates/1/launch/", json_body={})
+        assert result == {"job": 7}
+        assert route.call_count == 2
+
+    @pytest.mark.asyncio
+    @respx.mock
+    @pytest.mark.parametrize(("retry_after", "expected"), [("60", 60), ("600", 120)])
+    async def test_retry_after_is_honored_and_capped(self, waits, retry_after, expected):
+        """AWX waits as the LM client does: Retry-After lengthens the backoff, up to 120 s."""
+        client = AwxClient(base_url=AWX_BASE, token="test-token", max_retries=2)
+        respx.get(f"{AWX_API}/job_templates/").mock(
+            side_effect=[
+                Response(429, headers={"Retry-After": retry_after}, json={"detail": "Throttled"}),
+                Response(200, json={"count": 0, "results": []}),
+            ]
+        )
+        await client.get("/job_templates/")
+        assert waits == [expected]
+
+    @pytest.mark.asyncio
+    @respx.mock
+    async def test_read_timeout_is_translated_with_a_message(self, waits):
+        """httpx raises ReadTimeout with an empty message; the translation names it."""
+        import httpx
+
+        client = AwxClient(base_url=AWX_BASE, token="test-token", max_retries=2)
+        route = respx.get(f"{AWX_API}/ping/").mock(side_effect=httpx.ReadTimeout(""))
+        with pytest.raises(LMConnectionError) as exc_info:
+            await client.get("/ping/")
+        assert "timed out" in exc_info.value.message
+        assert "/ping/" in exc_info.value.message
+        assert route.call_count == 1
+
+
 class TestAwxClientConnectionError:
     """Tests for connection failure handling."""
 

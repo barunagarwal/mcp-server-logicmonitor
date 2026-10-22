@@ -164,6 +164,7 @@ def _build_client(rec: dict):
         timeout=cfg.timeout,
         api_version=cfg.api_version,
         max_retries=cfg.max_retries,
+        retry_after_cap=cfg.retry_after_cap_seconds,
         ingest_url=f"https://{portal}",
     )
 

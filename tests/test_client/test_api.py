@@ -1,6 +1,7 @@
 # Description: Tests for LogicMonitor API client.
 # Description: Uses respx to mock HTTP responses for testing.
 
+import httpx
 import pytest
 import respx
 from httpx import Response
@@ -217,8 +218,8 @@ class TestLogicMonitorClientErrors:
 
     @pytest.mark.asyncio
     @respx.mock
-    async def test_429_raises_rate_limit_error(self):
-        """429 response raises RateLimitError."""
+    async def test_429_raises_rate_limit_error(self, waits):
+        """429 response raises RateLimitError after waiting Retry-After each time."""
         from lm_mcp.auth.bearer import BearerAuth
         from lm_mcp.client import LogicMonitorClient
         from lm_mcp.exceptions import RateLimitError
@@ -240,6 +241,7 @@ class TestLogicMonitorClientErrors:
                 await client.get("/test")
 
         assert exc_info.value.retry_after == 60
+        assert waits == [60, 60, 60]
 
     @pytest.mark.asyncio
     @respx.mock
@@ -934,3 +936,201 @@ class TestStringIdSchemaPattern:
                 jsonschema.validate({prop: bad}, schema)
         for good in ("SDT_123", "note-1", "42"):
             jsonschema.validate({prop: good}, schema)
+
+
+_API = "https://test.logicmonitor.com/santaba/rest"
+
+
+def _retry_client(retry_after_cap: int = 120):
+    """A client with LM_MAX_RETRIES=2 and both API and ingest URLs."""
+    from lm_mcp.auth.bearer import BearerAuth
+    from lm_mcp.client import LogicMonitorClient
+
+    return LogicMonitorClient(
+        base_url=_API,
+        auth=BearerAuth("test_token"),
+        max_retries=2,
+        ingest_url="https://test.logicmonitor.com",
+        retry_after_cap=retry_after_cap,
+    )
+
+
+@pytest.fixture
+def waits(monkeypatch):
+    """Record each backoff wait instead of sleeping."""
+    recorded: list[float] = []
+
+    async def fake_sleep(seconds):
+        recorded.append(seconds)
+
+    monkeypatch.setattr("lm_mcp.client.api.asyncio.sleep", fake_sleep)
+    return recorded
+
+
+class TestRetryPolicy:
+    """R3.5: 5xx is retried only for idempotent methods; 429 for every method."""
+
+    @pytest.mark.asyncio
+    @respx.mock
+    @pytest.mark.parametrize("method", ["GET", "PUT", "DELETE"])
+    async def test_idempotent_5xx_is_retried(self, method, waits):
+        """GET, PUT and DELETE on 500 are sent three times with LM_MAX_RETRIES=2."""
+        from lm_mcp.exceptions import ServerError
+
+        route = respx.route(method=method, url=f"{_API}/device/devices/1").mock(
+            return_value=Response(500, json={"errorMessage": "boom"})
+        )
+        async with _retry_client() as client:
+            with pytest.raises(ServerError):
+                await client.request(method, "/device/devices/1")
+
+        assert route.call_count == 3
+        assert len(waits) == 2
+
+    @pytest.mark.asyncio
+    @respx.mock
+    @pytest.mark.parametrize("call", ["post", "patch", "post_multipart"])
+    async def test_non_idempotent_5xx_is_not_retried(self, call, waits):
+        """POST, PATCH and the multipart import on 500 are sent once and raise ServerError."""
+        from lm_mcp.exceptions import ServerError
+
+        route = respx.route(url=f"{_API}/device/devices").mock(
+            return_value=Response(500, json={"errorMessage": "boom"})
+        )
+        async with _retry_client() as client:
+            with pytest.raises(ServerError):
+                await getattr(client, call)("/device/devices", {"name": "x"})
+
+        assert route.call_count == 1
+        assert waits == []
+
+    @pytest.mark.asyncio
+    @respx.mock
+    async def test_post_429_is_retried(self, waits):
+        """A rate-limited POST was never applied, so it is sent again."""
+        route = respx.post(f"{_API}/device/devices").mock(
+            side_effect=[Response(429), Response(429), Response(200, json={"id": 1})]
+        )
+        async with _retry_client() as client:
+            result = await client.post("/device/devices", {"name": "x"})
+
+        assert result == {"id": 1}
+        assert route.call_count == 3
+
+    @pytest.mark.asyncio
+    @respx.mock
+    @pytest.mark.parametrize(("retry_after", "expected"), [("60", 60), ("600", 120)])
+    async def test_retry_after_is_honored_and_capped(
+        self, retry_after, expected, waits, monkeypatch
+    ):
+        """Retry-After lengthens the wait past the backoff, up to the configured cap."""
+        monkeypatch.setenv("LM_PORTAL", "test.logicmonitor.com")
+        monkeypatch.setenv("LM_BEARER_TOKEN", "test-token-12345")
+        from lm_mcp.config import get_config, reset_config
+
+        reset_config()
+        cap = get_config().retry_after_cap_seconds
+        assert cap == 120
+
+        respx.get(f"{_API}/device/devices").mock(
+            side_effect=[
+                Response(429, headers={"Retry-After": retry_after}),
+                Response(200, json={"items": []}),
+            ]
+        )
+        async with _retry_client(retry_after_cap=cap) as client:
+            await client.get("/device/devices")
+
+        assert waits == [expected]
+
+    @pytest.mark.asyncio
+    @respx.mock
+    async def test_ingest_post_follows_the_same_policy(self, waits):
+        """ingest_post retries 429 and sends a 500 once."""
+        from lm_mcp.exceptions import ServerError
+
+        ingest = "https://test.logicmonitor.com/rest/log/ingest"
+        limited = respx.post(ingest).mock(
+            side_effect=[Response(429), Response(202, json={"success": True})]
+        )
+        async with _retry_client() as client:
+            assert await client.ingest_post("/rest/log/ingest", json_body=[{"msg": "x"}])
+        assert limited.call_count == 2
+
+        respx.clear()
+        failing = respx.post(ingest).mock(return_value=Response(500, json={"errorMessage": "x"}))
+        async with _retry_client() as client:
+            with pytest.raises(ServerError):
+                await client.ingest_post("/rest/log/ingest", json_body=[{"msg": "x"}])
+        assert failing.call_count == 1
+
+
+class TestTransportErrorTranslation:
+    """R3.5: timeouts and dropped connections surface as LMConnectionError, like ConnectError.
+
+    They are not resent: a request that timed out or lost its connection may have
+    reached the server, and ConnectError is not resent either.
+    """
+
+    @pytest.mark.asyncio
+    @respx.mock
+    @pytest.mark.parametrize(
+        "exc", [httpx.ReadTimeout(""), httpx.ConnectTimeout(""), httpx.PoolTimeout("")]
+    )
+    async def test_timeout_names_the_timeout_and_the_path(self, exc, waits):
+        from lm_mcp.exceptions import LMConnectionError
+
+        route = respx.get(f"{_API}/device/devices").mock(side_effect=exc)
+        async with _retry_client() as client:
+            with pytest.raises(LMConnectionError) as exc_info:
+                await client.get("/device/devices")
+
+        assert "timed out" in exc_info.value.message
+        assert "/device/devices" in exc_info.value.message
+        assert route.call_count == 1
+
+    @pytest.mark.asyncio
+    @respx.mock
+    @pytest.mark.parametrize(
+        "exc",
+        [
+            httpx.RemoteProtocolError(""),
+            httpx.ReadError(""),
+            httpx.WriteError(""),
+            httpx.CloseError(""),
+            httpx.ProxyError(""),
+            httpx.UnsupportedProtocol(""),
+        ],
+    )
+    async def test_dropped_connection_gets_a_message(self, exc, waits):
+        """httpx raises these with an empty message; the translation still says what failed."""
+        from lm_mcp.exceptions import LMConnectionError
+
+        route = respx.get(f"{_API}/device/devices").mock(side_effect=exc)
+        async with _retry_client() as client:
+            with pytest.raises(LMConnectionError) as exc_info:
+                await client.get("/device/devices")
+
+        assert type(exc).__name__ in exc_info.value.message
+        assert "/device/devices" in exc_info.value.message
+        assert route.call_count == 1
+
+    @pytest.mark.asyncio
+    @respx.mock
+    @pytest.mark.parametrize(
+        ("call", "args"),
+        [
+            ("post_multipart", ("/setting/datasources/importjson", {"name": "x"})),
+            ("ingest_post", ("/rest/log/ingest", [{"msg": "x"}])),
+        ],
+    )
+    async def test_import_and_ingest_translate_timeouts(self, call, args, waits):
+        from lm_mcp.exceptions import LMConnectionError
+
+        respx.route().mock(side_effect=httpx.ReadTimeout(""))
+        async with _retry_client() as client:
+            with pytest.raises(LMConnectionError) as exc_info:
+                await getattr(client, call)(*args)
+
+        assert "timed out" in exc_info.value.message
+        assert args[0] in exc_info.value.message

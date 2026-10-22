@@ -48,6 +48,7 @@ async def run_stdio() -> None:
             timeout=config.timeout,
             api_version=config.api_version,
             max_retries=config.max_retries,
+            retry_after_cap=config.retry_after_cap_seconds,
             ingest_url=config.ingest_url,
         )
         _set_client(client)
