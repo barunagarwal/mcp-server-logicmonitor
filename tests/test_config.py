@@ -428,3 +428,70 @@ class TestMultiPortalConfig:
         config = LMConfig()
         with pytest.raises(ValueError, match="portal"):
             _ = config.ingest_url
+
+
+class TestHttpUnauthenticatedBind:
+    """R3.3: the HTTP transport refuses an unauthenticated non-loopback bind."""
+
+    @pytest.fixture(autouse=True)
+    def _http_env(self, monkeypatch):
+        monkeypatch.setenv("LM_PORTAL", "test.logicmonitor.com")
+        monkeypatch.setenv("LM_BEARER_TOKEN", "test-token")
+        for var in ("LM_HTTP_AUTH_TOKEN", "LM_HTTP_ALLOW_UNAUTHENTICATED", "LM_HTTP_HOST"):
+            monkeypatch.delenv(var, raising=False)
+        monkeypatch.setenv("LM_TRANSPORT", "http")
+
+    def test_allow_unauthenticated_defaults_to_false(self, monkeypatch):
+        """LM_HTTP_ALLOW_UNAUTHENTICATED is a bool that defaults to False."""
+        monkeypatch.setenv("LM_HTTP_HOST", "127.0.0.1")
+        assert LMConfig().http_allow_unauthenticated is False
+
+    @pytest.mark.parametrize(("raw", "expected"), [("true", True), ("1", True), ("false", False)])
+    def test_allow_unauthenticated_parses_as_bool(self, monkeypatch, raw, expected):
+        """The override reads the usual boolean spellings."""
+        monkeypatch.setenv("LM_HTTP_HOST", "127.0.0.1")
+        monkeypatch.setenv("LM_HTTP_ALLOW_UNAUTHENTICATED", raw)
+        assert LMConfig().http_allow_unauthenticated is expected
+
+    @pytest.mark.parametrize("host", ["0.0.0.0", "::", "10.1.2.3", "mcp.internal"])
+    def test_non_loopback_bind_without_token_is_refused(self, monkeypatch, host):
+        """A non-loopback bind with no token and no override fails with one line naming both."""
+        monkeypatch.setenv("LM_HTTP_HOST", host)
+        with pytest.raises(ValidationError) as exc:
+            LMConfig()
+        message = exc.value.errors()[0]["msg"]
+        assert "\n" not in message
+        assert "LM_HTTP_AUTH_TOKEN" in message
+        assert "LM_HTTP_ALLOW_UNAUTHENTICATED" in message
+
+    def test_empty_token_counts_as_unset(self, monkeypatch):
+        """Compose passes ${LM_HTTP_AUTH_TOKEN:-}, an empty string; it does not satisfy the bind."""
+        monkeypatch.setenv("LM_HTTP_HOST", "0.0.0.0")
+        monkeypatch.setenv("LM_HTTP_AUTH_TOKEN", "")
+        with pytest.raises(ValidationError, match="LM_HTTP_ALLOW_UNAUTHENTICATED"):
+            LMConfig()
+
+    @pytest.mark.parametrize("host", ["127.0.0.1", "::1", "localhost", "LOCALHOST"])
+    def test_loopback_bind_without_token_is_allowed(self, monkeypatch, host):
+        """Loopback binds need no token."""
+        monkeypatch.setenv("LM_HTTP_HOST", host)
+        assert LMConfig().http_auth_token is None
+
+    def test_non_loopback_bind_with_token_is_allowed(self, monkeypatch):
+        """A token satisfies a non-loopback bind."""
+        monkeypatch.setenv("LM_HTTP_HOST", "0.0.0.0")
+        monkeypatch.setenv("LM_HTTP_AUTH_TOKEN", "a" * 16)
+        assert LMConfig().http_host == "0.0.0.0"
+
+    def test_non_loopback_bind_with_override_is_allowed(self, monkeypatch):
+        """The explicit override admits an unauthenticated non-loopback bind."""
+        monkeypatch.setenv("LM_HTTP_HOST", "0.0.0.0")
+        monkeypatch.setenv("LM_HTTP_ALLOW_UNAUTHENTICATED", "true")
+        assert LMConfig().http_allow_unauthenticated is True
+
+    def test_stdio_transport_ignores_the_bind(self, monkeypatch):
+        """stdio never binds, so the default 0.0.0.0 host with no token constructs."""
+        monkeypatch.setenv("LM_TRANSPORT", "stdio")
+        config = LMConfig()
+        assert config.http_host == "0.0.0.0"
+        assert config.http_auth_token is None

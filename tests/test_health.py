@@ -227,7 +227,7 @@ def _asgi_client():
 
     from lm_mcp.transport.http import create_asgi_app
 
-    return AsyncClient(transport=ASGITransport(app=create_asgi_app()), base_url="http://test")
+    return AsyncClient(transport=ASGITransport(app=create_asgi_app()), base_url="http://localhost")
 
 
 class TestReadyzStaysLocal:
@@ -288,32 +288,27 @@ class TestHealthConnectivityGate:
         self, connectivity_env, admins_route, monkeypatch
     ):
         """Over a real uvicorn socket: probes stay local, only the token holder pings."""
-        import asyncio
-
         import httpx
         import uvicorn
 
         from lm_mcp.transport.http import create_asgi_app
+        from tests.live_uvicorn import live_uvicorn
 
+        live_server = live_uvicorn(monkeypatch)
         monkeypatch.setenv("LM_HTTP_AUTH_TOKEN", INBOUND_BEARER)
         server = uvicorn.Server(
             uvicorn.Config(create_asgi_app(), host="127.0.0.1", port=0, log_level="warning")
         )
-        serving = asyncio.create_task(server.serve())
-        try:
-            while not server.started:
-                await asyncio.sleep(0.01)
-            port = server.servers[0].sockets[0].getsockname()[1]
-            async with httpx.AsyncClient(base_url=f"http://127.0.0.1:{port}") as client:
-                readyz = await client.get("/readyz")
-                anonymous = await client.get("/health")
-                assert admins_route.call_count == 0
-                authed = await client.get(
-                    "/health", headers={"Authorization": f"Bearer {INBOUND_BEARER}"}
-                )
-        finally:
-            server.should_exit = True
-            await serving
+        async with (
+            live_server(server.serve()) as port,
+            httpx.AsyncClient(base_url=f"http://127.0.0.1:{port}") as client,
+        ):
+            readyz = await client.get("/readyz")
+            anonymous = await client.get("/health")
+            assert admins_route.call_count == 0
+            authed = await client.get(
+                "/health", headers={"Authorization": f"Bearer {INBOUND_BEARER}"}
+            )
 
         assert readyz.status_code == 200
         assert anonymous.status_code == 200
@@ -338,6 +333,7 @@ class TestHttpServerClientConstruction:
         monkeypatch.setenv("LM_PORTAL", "test.logicmonitor.com")
         monkeypatch.setenv("LM_BEARER_TOKEN", "test-token")
         monkeypatch.setenv("LM_TRANSPORT", "http")
+        monkeypatch.setenv("LM_HTTP_HOST", "127.0.0.1")
         monkeypatch.setenv("LM_MAX_RETRIES", "7")
         monkeypatch.setattr("lm_mcp.hf_config.get_hf_config", lambda: None)
         # Shutdown closes the client, so read it while the server is "serving".

@@ -57,6 +57,11 @@ spec:
               value: 0.0.0.0
             - name: LM_HTTP_PORT
               value: "8080"
+            # Host names every route except /healthz and /readyz answers besides
+            # loopback. Add mcp-server-logicmonitor.<namespace>.svc.cluster.local for
+            # callers in other namespaces, and the Ingress or Route host if exposed.
+            - name: LM_HTTP_ALLOWED_HOSTS
+              value: mcp-server-logicmonitor
             - name: LM_PORTAL
               valueFrom:
                 secretKeyRef:
@@ -67,8 +72,9 @@ spec:
                 secretKeyRef:
                   name: lm-mcp-credentials
                   key: bearer-token
-            # Requires a bearer token on /mcp and /api/v1/*. Drop this block only
-            # if the service is unreachable from outside the cluster.
+            # Requires a bearer token on /mcp and /api/v1/*. The pod binds 0.0.0.0,
+            # so the server refuses to start without it unless
+            # LM_HTTP_ALLOW_UNAUTHENTICATED is true (a listener protected another way).
             - name: LM_HTTP_AUTH_TOKEN
               valueFrom:
                 secretKeyRef:

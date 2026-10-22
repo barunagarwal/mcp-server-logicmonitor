@@ -34,7 +34,14 @@ You can expect:
   credentials. Anyone who can reach the port can use them.
 - Set `LM_HTTP_AUTH_TOKEN` whenever the port is reachable beyond localhost:
   `/mcp` and `/api/v1/*` then require `Authorization: Bearer <token>` and
-  return 401 otherwise. Starting without it logs a warning.
+  return 401 otherwise. A bind outside `127.0.0.1`, `::1` and `localhost`
+  refuses to start without it unless `LM_HTTP_ALLOW_UNAUTHENTICATED=true`
+  accepts the exposure; the default `LM_HTTP_HOST` is `0.0.0.0`.
+- Request bodies on `/mcp` and `/api/v1/*` must be `application/json` (415
+  otherwise), and every route except `/healthz` and `/readyz` answers only the
+  loopback names, a non-wildcard `LM_HTTP_HOST` and `LM_HTTP_ALLOWED_HOSTS` in
+  `Host` (400 otherwise). Together they block cross-site form posts and DNS
+  rebinding from a page in the operator's browser.
 - `/`, `/health`, `/healthz`, and `/readyz` stay unauthenticated so container
   healthchecks and orchestrator probes keep working. Their responses carry
   component status, never LogicMonitor data. None of them calls the

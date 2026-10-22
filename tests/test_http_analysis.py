@@ -26,7 +26,7 @@ class TestPostAnalyze:
         app = create_asgi_app()
         transport = ASGITransport(app=app)
 
-        async with AsyncClient(transport=transport, base_url="http://test") as client:
+        async with AsyncClient(transport=transport, base_url="http://localhost") as client:
             resp = await client.post(
                 "/api/v1/analyze",
                 json={"workflow": "health_check", "arguments": {}},
@@ -47,7 +47,7 @@ class TestPostAnalyze:
         app = create_asgi_app()
         transport = ASGITransport(app=app)
 
-        async with AsyncClient(transport=transport, base_url="http://test") as client:
+        async with AsyncClient(transport=transport, base_url="http://localhost") as client:
             resp = await client.post(
                 "/api/v1/analyze",
                 json={"workflow": "nonexistent", "arguments": {}},
@@ -66,7 +66,7 @@ class TestPostAnalyze:
         app = create_asgi_app()
         transport = ASGITransport(app=app)
 
-        async with AsyncClient(transport=transport, base_url="http://test") as client:
+        async with AsyncClient(transport=transport, base_url="http://localhost") as client:
             resp = await client.post(
                 "/api/v1/analyze",
                 content=b"not json",
@@ -85,7 +85,7 @@ class TestPostAnalyze:
         app = create_asgi_app()
         transport = ASGITransport(app=app)
 
-        async with AsyncClient(transport=transport, base_url="http://test") as client:
+        async with AsyncClient(transport=transport, base_url="http://localhost") as client:
             resp = await client.post(
                 "/api/v1/analyze",
                 json={"arguments": {}},
@@ -107,7 +107,7 @@ class TestGetAnalysis:
         app = create_asgi_app()
         transport = ASGITransport(app=app)
 
-        async with AsyncClient(transport=transport, base_url="http://test") as client:
+        async with AsyncClient(transport=transport, base_url="http://localhost") as client:
             # Create an analysis first
             post_resp = await client.post(
                 "/api/v1/analyze",
@@ -133,7 +133,7 @@ class TestGetAnalysis:
         app = create_asgi_app()
         transport = ASGITransport(app=app)
 
-        async with AsyncClient(transport=transport, base_url="http://test") as client:
+        async with AsyncClient(transport=transport, base_url="http://localhost") as client:
             resp = await client.get("/api/v1/analysis/nonexistent-id")
 
         assert resp.status_code == 404
@@ -152,7 +152,7 @@ class TestWebhookAlert:
         app = create_asgi_app()
         transport = ASGITransport(app=app)
 
-        async with AsyncClient(transport=transport, base_url="http://test") as client:
+        async with AsyncClient(transport=transport, base_url="http://localhost") as client:
             resp = await client.post(
                 "/api/v1/webhooks/alert",
                 json={
@@ -176,7 +176,7 @@ class TestWebhookAlert:
         app = create_asgi_app()
         transport = ASGITransport(app=app)
 
-        async with AsyncClient(transport=transport, base_url="http://test") as client:
+        async with AsyncClient(transport=transport, base_url="http://localhost") as client:
             resp = await client.post(
                 "/api/v1/webhooks/alert",
                 content=b"not json",
@@ -199,7 +199,7 @@ class TestRootEndpoint:
         app = create_asgi_app()
         transport = ASGITransport(app=app)
 
-        async with AsyncClient(transport=transport, base_url="http://test") as client:
+        async with AsyncClient(transport=transport, base_url="http://localhost") as client:
             resp = await client.get("/")
 
         data = resp.json()

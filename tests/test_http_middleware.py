@@ -25,7 +25,7 @@ class TestHttpToolsListFiltering:
         app = create_asgi_app()
         transport = ASGITransport(app=app)
 
-        async with AsyncClient(transport=transport, base_url="http://test") as client:
+        async with AsyncClient(transport=transport, base_url="http://localhost") as client:
             resp = await client.post(
                 "/mcp",
                 json={"jsonrpc": "2.0", "method": "tools/list", "id": 1},
@@ -49,7 +49,7 @@ class TestHttpToolsListFiltering:
         app = create_asgi_app()
         transport = ASGITransport(app=app)
 
-        async with AsyncClient(transport=transport, base_url="http://test") as client:
+        async with AsyncClient(transport=transport, base_url="http://localhost") as client:
             resp = await client.post(
                 "/mcp",
                 json={"jsonrpc": "2.0", "method": "tools/list", "id": 1},
@@ -79,7 +79,7 @@ class TestHttpToolsListFiltering:
         app = create_asgi_app()
         transport = ASGITransport(app=app)
 
-        async with AsyncClient(transport=transport, base_url="http://test") as client:
+        async with AsyncClient(transport=transport, base_url="http://localhost") as client:
             resp = await client.post(
                 "/mcp",
                 json={"jsonrpc": "2.0", "method": "tools/list", "id": 1},
@@ -114,7 +114,7 @@ class TestHttpToolsListWithAwx:
         app = create_asgi_app()
         transport = ASGITransport(app=app)
 
-        async with AsyncClient(transport=transport, base_url="http://test") as client:
+        async with AsyncClient(transport=transport, base_url="http://localhost") as client:
             resp = await client.post(
                 "/mcp",
                 json={"jsonrpc": "2.0", "method": "tools/list", "id": 1},
@@ -149,7 +149,7 @@ class TestHttpToolsCallMiddleware:
             app = create_asgi_app()
             transport = ASGITransport(app=app)
 
-            async with AsyncClient(transport=transport, base_url="http://test") as client:
+            async with AsyncClient(transport=transport, base_url="http://localhost") as client:
                 resp = await client.post(
                     "/mcp",
                     json={
@@ -191,7 +191,7 @@ class TestHttpToolsCallMiddleware:
             app = create_asgi_app()
             transport = ASGITransport(app=app)
 
-            async with AsyncClient(transport=transport, base_url="http://test") as client:
+            async with AsyncClient(transport=transport, base_url="http://localhost") as client:
                 resp = await client.post(
                     "/mcp",
                     json={
@@ -221,7 +221,7 @@ class TestHttpToolsCallMiddleware:
         app = create_asgi_app()
         transport = ASGITransport(app=app)
 
-        async with AsyncClient(transport=transport, base_url="http://test") as client:
+        async with AsyncClient(transport=transport, base_url="http://localhost") as client:
             resp = await client.post(
                 "/mcp",
                 json={
@@ -282,7 +282,7 @@ class TestHttpToolsListWithTerraform:
         app = create_asgi_app()
         transport = ASGITransport(app=app)
 
-        async with AsyncClient(transport=transport, base_url="http://test") as client:
+        async with AsyncClient(transport=transport, base_url="http://localhost") as client:
             resp = await client.post(
                 "/mcp",
                 json={"jsonrpc": "2.0", "method": "tools/list", "id": 1},
@@ -309,7 +309,7 @@ class TestHttpToolsListWithTerraform:
         app = create_asgi_app()
         transport = ASGITransport(app=app)
 
-        async with AsyncClient(transport=transport, base_url="http://test") as client:
+        async with AsyncClient(transport=transport, base_url="http://localhost") as client:
             resp = await client.post(
                 "/mcp",
                 json={"jsonrpc": "2.0", "method": "tools/list", "id": 1},

@@ -1,5 +1,12 @@
 # Description: Docker Compose configuration for LogicMonitor MCP server.
 # Description: Includes optional Caddy reverse proxy for TLS termination.
+#
+# LM_HTTP_AUTH_TOKEN is required: every `docker compose` command (with or without
+# --profile tls) fails until deploy/.env sets it. Compose interpolates every
+# service, including profiles that are not enabled, so the requirement cannot be
+# limited to the tls profile, and the server itself refuses to start without a
+# token on the container's 0.0.0.0 bind. Generate one with:
+#   python3 -c "import secrets; print(secrets.token_urlsafe(32))"
 
 services:
   lm-mcp:
@@ -26,7 +33,10 @@ services:
       - LM_HTTP_PORT=8080
       - LM_ENABLE_WRITE_OPERATIONS=${LM_ENABLE_WRITE_OPERATIONS:-false}
       - LM_CORS_ORIGINS=${LM_CORS_ORIGINS:-}
-      - LM_HTTP_AUTH_TOKEN=${LM_HTTP_AUTH_TOKEN:-}
+      - LM_HTTP_AUTH_TOKEN=${LM_HTTP_AUTH_TOKEN:?set LM_HTTP_AUTH_TOKEN in deploy/.env (16+ characters); the server refuses to start without it}
+      # Host names the server answers besides loopback; Caddy forwards the
+      # client's Host, so the tls profile needs its DOMAIN here.
+      - LM_HTTP_ALLOWED_HOSTS=${LM_HTTP_ALLOWED_HOSTS:-${DOMAIN:-localhost}}
       - LM_SESSION_ENABLED=${LM_SESSION_ENABLED:-true}
       - LM_FIELD_VALIDATION=${LM_FIELD_VALIDATION:-warn}
     healthcheck:

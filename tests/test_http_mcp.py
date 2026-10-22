@@ -30,7 +30,7 @@ async def _post(body):
     from lm_mcp.transport.http import create_asgi_app
 
     transport = ASGITransport(app=create_asgi_app())
-    async with AsyncClient(transport=transport, base_url="http://test") as client:
+    async with AsyncClient(transport=transport, base_url="http://localhost") as client:
         return await client.post(
             "/mcp", content=json.dumps(body), headers={"Content-Type": "application/json"}
         )

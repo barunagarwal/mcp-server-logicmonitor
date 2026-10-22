@@ -49,6 +49,7 @@ class TestGetTransportRunner:
         monkeypatch.setenv("LM_PORTAL", "test.logicmonitor.com")
         monkeypatch.setenv("LM_BEARER_TOKEN", "test-token")
         monkeypatch.setenv("LM_TRANSPORT", "http")
+        monkeypatch.setenv("LM_HTTP_HOST", "127.0.0.1")
 
         from lm_mcp.config import LMConfig
 

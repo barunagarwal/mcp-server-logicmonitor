@@ -155,3 +155,29 @@ class TestHealthcheck:
         assert compose_test == ["CMD", *image_cmd]
         assert image_cmd[:2] == ["python", "-c"]
         assert "LM_HTTP_PORT" in image_cmd[2]
+
+
+class TestHttpExposure:
+    """R3.3: the deployments require the inbound token and allow the Host names they serve."""
+
+    @staticmethod
+    def _compose_env() -> dict[str, str]:
+        entries = _compose()["services"]["lm-mcp"]["environment"]
+        return dict(entry.split("=", 1) for entry in entries)
+
+    def test_compose_requires_the_inbound_token(self) -> None:
+        token = self._compose_env()["LM_HTTP_AUTH_TOKEN"]
+        assert token.startswith("${LM_HTTP_AUTH_TOKEN:?"), token
+
+    def test_compose_allows_the_tls_domain_as_host(self) -> None:
+        assert self._compose_env()["LM_HTTP_ALLOWED_HOSTS"] == (
+            "${LM_HTTP_ALLOWED_HOSTS:-${DOMAIN:-localhost}}"
+        )
+
+    def test_k8s_allows_the_service_name_as_host(self) -> None:
+        docs = [doc for doc in yaml.safe_load_all(K8S.read_text()) if doc]
+        service = next(doc for doc in docs if doc["kind"] == "Service")
+        container = _deployment()["spec"]["template"]["spec"]["containers"][0]
+        env = {e["name"]: e.get("value") for e in container["env"]}
+        hosts = [h.strip() for h in env["LM_HTTP_ALLOWED_HOSTS"].split(",")]
+        assert service["metadata"]["name"] in hosts
