@@ -10,6 +10,7 @@ from typing import TYPE_CHECKING
 
 from mcp.types import TextContent
 
+from lm_mcp.exceptions import ValidationError
 from lm_mcp.tools import format_response, handle_error, require_write_permission
 
 if TYPE_CHECKING:
@@ -59,6 +60,120 @@ def _lm_env_vars() -> dict[str, str]:
         return {}
 
 
+# Top-level -backend-config keys terraform_init accepts: the documented keys of the
+# local, s3 and azurerm backends, minus those that redirect where state traffic goes
+# (endpoint overrides, proxies, metadata, MSI and OIDC URLs) or weaken TLS
+# (insecure, custom_ca_bundle). A key outside this set, such as the http backend's
+# address, is refused by name.
+#   https://developer.hashicorp.com/terraform/language/backend/local
+#   https://developer.hashicorp.com/terraform/language/backend/s3
+#   https://developer.hashicorp.com/terraform/language/backend/azurerm
+_BACKEND_CONFIG_KEYS = frozenset(
+    {
+        # local
+        "path",
+        "workspace_dir",
+        # s3
+        "bucket",
+        "key",
+        "region",
+        "acl",
+        "encrypt",
+        "kms_key_id",
+        "sse_customer_key",
+        "workspace_key_prefix",
+        "use_lockfile",
+        "dynamodb_table",
+        "access_key",
+        "secret_key",
+        "token",
+        "profile",
+        "shared_config_files",
+        "shared_credentials_file",
+        "shared_credentials_files",
+        "allowed_account_ids",
+        "forbidden_account_ids",
+        "max_retries",
+        "retry_mode",
+        "skip_credentials_validation",
+        "skip_region_validation",
+        "skip_requesting_account_id",
+        "skip_metadata_api_check",
+        "skip_s3_checksum",
+        "sts_region",
+        "use_dualstack_endpoint",
+        "use_fips_endpoint",
+        "use_path_style",
+        "force_path_style",
+        # azurerm
+        "storage_account_name",
+        "container_name",
+        "snapshot",
+        "resource_group_name",
+        "subscription_id",
+        "tenant_id",
+        "lookup_blob_endpoint",
+        "use_azuread_auth",
+        "sas_token",
+        "use_cli",
+        "use_msi",
+        "use_oidc",
+        "use_aks_workload_identity",
+        "ado_pipeline_service_connection_id",
+        "client_id",
+        "client_id_file_path",
+        "client_secret",
+        "client_secret_file_path",
+        "client_certificate",
+        "client_certificate_path",
+        "client_certificate_password",
+        "oidc_request_token",
+        "oidc_token",
+        "oidc_token_file_path",
+    }
+)
+
+# Local backend keys that name where state is written, so they stay in the workspace.
+_BACKEND_PATH_KEYS = frozenset({"path", "workspace_dir"})
+
+
+def _confine_to_workspace(runner: TerraformRunner, workspace: str, label: str, path: str) -> str:
+    """Return path unchanged if it resolves inside the workspace, else refuse it.
+
+    Resolution follows symlinks, so a link inside the workspace that points out
+    of it is refused too.
+    """
+    root = runner.workspace_path(workspace)
+    if not (root / path).resolve().is_relative_to(root):
+        raise ValidationError(
+            f"{label} '{path}' escapes the workspace directory",
+            suggestion=f"Give {label} as a path inside the '{workspace}' workspace.",
+        )
+    return path
+
+
+def _backend_config_args(
+    runner: TerraformRunner, workspace: str, backend_config: dict[str, str]
+) -> list[str]:
+    """Build -backend-config flags from allowlisted keys, refusing the rest by name."""
+    refused = sorted(k for k in backend_config if k not in _BACKEND_CONFIG_KEYS)
+    if refused:
+        names = ", ".join(f"'{k}'" for k in refused)
+        raise ValidationError(
+            f"backend_config key {names} is not allowed",
+            suggestion=(
+                "Use keys of the local, s3 or azurerm backend; endpoint and proxy "
+                "overrides are refused. Declare anything else in the backend block."
+            ),
+        )
+    args: list[str] = []
+    for key, value in backend_config.items():
+        if key in _BACKEND_PATH_KEYS:
+            _confine_to_workspace(runner, workspace, f"backend_config {key}", value)
+        args.extend(["-backend-config", f"{key}={value}"])
+    return args
+
+
 def _parse_plan_exit_code(exit_code: int) -> str:
     """Interpret terraform plan -detailed-exitcode values."""
     if exit_code == 0:
@@ -82,26 +197,31 @@ def _safe_name(raw: str) -> str:
 
 
 # ---------------------------------------------------------------------------
-# Read-only tools (receive TerraformRunner)
+# Runner tools (receive TerraformRunner); init and plan are write-gated
 # ---------------------------------------------------------------------------
 
 
+@require_write_permission
 async def terraform_init(
     runner: TerraformRunner,
     workspace: str,
-    backend_config: str | None = None,
+    backend_config: dict[str, str] | None = None,
 ) -> list[TextContent]:
     """Initialize a Terraform workspace and download providers.
+
+    Write-gated: init downloads and runs provider plugins and configures the
+    state backend.
 
     Args:
         runner: TerraformRunner instance.
         workspace: Workspace name (subdirectory of TF_WORKSPACE_DIR).
-        backend_config: Optional backend config string (key=value).
+        backend_config: Optional partial backend configuration as key/value pairs,
+            limited to local, s3 and azurerm keys.
     """
     try:
         args = ["init", "-no-color"]
         if backend_config:
-            args.extend(["-backend-config", backend_config])
+            args.extend(_backend_config_args(runner, workspace, backend_config))
         result = await runner.run(args, workspace, env_extra=_lm_env_vars())
         return format_response(
             {
@@ -146,6 +266,7 @@ async def terraform_validate(
         return handle_error(e)
 
 
+@require_write_permission
 async def terraform_plan(
     runner: TerraformRunner,
     workspace: str,
@@ -156,6 +277,8 @@ async def terraform_plan(
     """Preview Terraform changes without applying.
 
     Uses -detailed-exitcode: 0=no changes, 1=error, 2=changes pending.
+    Write-gated: plan runs provider plugins and evaluates data sources against
+    live APIs.
 
     Args:
         runner: TerraformRunner instance.
@@ -169,7 +292,9 @@ async def terraform_plan(
         if var:
             args.extend(["-var", var])
         if var_file:
-            args.extend(["-var-file", var_file])
+            args.extend(
+                ["-var-file", _confine_to_workspace(runner, workspace, "var_file", var_file)]
+            )
         if target:
             args.extend(["-target", target])
         result = await runner.run(args, workspace, env_extra=_lm_env_vars())
@@ -357,7 +482,9 @@ async def terraform_apply(
         if var:
             args.extend(["-var", var])
         if var_file:
-            args.extend(["-var-file", var_file])
+            args.extend(
+                ["-var-file", _confine_to_workspace(runner, workspace, "var_file", var_file)]
+            )
         if target:
             args.extend(["-target", target])
         result = await runner.run(args, workspace, env_extra=_lm_env_vars())

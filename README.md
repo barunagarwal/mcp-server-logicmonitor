@@ -240,9 +240,9 @@ watsonx tools are optional — they only appear when `WATSONX_API_KEY` and `WATS
 
 11 tools for Infrastructure as Code workflows with any Terraform provider. AI agents can author HCL, use pre-made scripts, or reverse-engineer existing LM resources.
 
-- **terraform_init**: Initialize workspace and download providers
+- **terraform_init**: Initialize workspace and download providers (write perms required)
 - **terraform_validate**: Syntax-check HCL configuration
-- **terraform_plan**: Preview changes with structured JSON output
+- **terraform_plan**: Preview changes with structured JSON output (write perms required: providers and data sources call live APIs)
 - **terraform_apply**: Apply changes (triple-gated: write perms + config flag + confirm param)
 - **terraform_destroy**: Destroy infrastructure (same triple gate)
 - **terraform_import**: Import existing resources into Terraform state
@@ -252,6 +252,10 @@ watsonx tools are optional — they only appear when `WATSONX_API_KEY` and `WATS
 - **terraform_generate**: Export existing LM portal resources as HCL using the `logicmonitor/logicmonitor` provider
 
 Terraform tools are optional -- they only appear when `TF_WORKSPACE_DIR` is configured. Requires the `terraform` CLI installed separately.
+
+The `terraform` subprocess inherits only `PATH`, `HOME`, `TMPDIR`, `TF_*`, the proxy settings (`HTTP_PROXY`, `HTTPS_PROXY`, `NO_PROXY` and their lowercase forms) and the CA settings (`SSL_CERT_FILE`, `SSL_CERT_DIR`) from the server's environment, so server and cloud credentials such as `LM_BEARER_TOKEN` or `AWS_SECRET_ACCESS_KEY` never reach provider or data-source code. The `logicmonitor` provider gets `LM_API_ID`, `LM_API_KEY` and `LM_COMPANY` (and their `TF_VAR_lm_*` forms) from the server's LMv1 configuration. Other providers take credentials as `TF_VAR_*` variables that the HCL passes to them, or from files under `HOME` such as `~/.aws/credentials`. A backend block cannot read variables, so backend credentials come from files under `HOME` or from `terraform_init`'s `backend_config` keys (`profile`, `access_key`, `sas_token` and the like).
+
+`var_file` and a local backend `path` must resolve inside the workspace, symlinks included. `terraform_init`'s `backend_config` takes an object of local, s3 or azurerm backend keys and refuses endpoint and proxy overrides by name. A command that exceeds `TF_TIMEOUT` gets SIGINT and 30 seconds to persist state and release its lock before it is killed; a timed-out `apply` or `destroy` reports that the lock may still be held and state may be incomplete.
 
 **Three entry points:**
 1. **Agent-authored**: AI generates HCL from natural language, writes to workspace, plans, applies

@@ -8139,7 +8139,7 @@
           "type": "string"
         },
         "var_file": {
-          "description": "Path to a .tfvars file relative to workspace",
+          "description": "Path to a .tfvars file inside the workspace (relative to it)",
           "type": "string"
         },
         "workspace": {
@@ -8246,17 +8246,20 @@
   "terraform_init": {
     "annotations": {
       "destructiveHint": false,
-      "idempotentHint": true,
+      "idempotentHint": false,
       "openWorldHint": true,
-      "readOnlyHint": true,
+      "readOnlyHint": false,
       "title": null
     },
-    "description": "Initialize a Terraform workspace and download required providers. Run this before plan, apply, or any other terraform operation.",
+    "description": "Initialize a Terraform workspace and download required providers. Run this before plan, apply, or any other terraform operation. Requires LM_ENABLE_WRITE_OPERATIONS=true.",
     "inputSchema": {
       "properties": {
         "backend_config": {
-          "description": "Optional backend config (key=value)",
-          "type": "string"
+          "additionalProperties": {
+            "type": "string"
+          },
+          "description": "Optional partial backend configuration as key/value pairs, e.g. {\"bucket\": \"state\", \"key\": \"prod.tfstate\", \"region\": \"us-east-1\"}. Keys of the local, s3 and azurerm backends only; endpoint and proxy overrides are refused, and a local path must stay inside the workspace.",
+          "type": "object"
         },
         "workspace": {
           "description": "Workspace name (subdirectory of TF_WORKSPACE_DIR)",
@@ -8294,12 +8297,12 @@
   "terraform_plan": {
     "annotations": {
       "destructiveHint": false,
-      "idempotentHint": true,
+      "idempotentHint": false,
       "openWorldHint": true,
-      "readOnlyHint": true,
+      "readOnlyHint": false,
       "title": null
     },
-    "description": "Preview Terraform changes without applying. Shows what resources will be created, modified, or destroyed. Returns structured JSON plan.",
+    "description": "Preview Terraform changes without applying. Shows what resources will be created, modified, or destroyed. Returns structured JSON plan. Requires LM_ENABLE_WRITE_OPERATIONS=true, since providers and data sources run against live APIs.",
     "inputSchema": {
       "properties": {
         "target": {
@@ -8311,7 +8314,7 @@
           "type": "string"
         },
         "var_file": {
-          "description": "Path to a .tfvars file relative to workspace",
+          "description": "Path to a .tfvars file inside the workspace (relative to it)",
           "type": "string"
         },
         "workspace": {

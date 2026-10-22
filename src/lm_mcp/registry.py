@@ -7187,9 +7187,10 @@ TF_TOOLS: list[Tool] = [
         name="terraform_init",
         description=(
             "Initialize a Terraform workspace and download required providers. "
-            "Run this before plan, apply, or any other terraform operation."
+            "Run this before plan, apply, or any other terraform operation. "
+            "Requires LM_ENABLE_WRITE_OPERATIONS=true."
         ),
-        annotations=_READ_ONLY,
+        annotations=_WRITE,
         inputSchema={
             "type": "object",
             "properties": {
@@ -7198,8 +7199,15 @@ TF_TOOLS: list[Tool] = [
                     "description": "Workspace name (subdirectory of TF_WORKSPACE_DIR)",
                 },
                 "backend_config": {
-                    "type": "string",
-                    "description": "Optional backend config (key=value)",
+                    "type": "object",
+                    "additionalProperties": {"type": "string"},
+                    "description": (
+                        "Optional partial backend configuration as key/value pairs, "
+                        'e.g. {"bucket": "state", "key": "prod.tfstate", '
+                        '"region": "us-east-1"}. Keys of the local, s3 and azurerm '
+                        "backends only; endpoint and proxy overrides are refused, and a "
+                        "local path must stay inside the workspace."
+                    ),
                 },
             },
             "required": ["workspace"],
@@ -7227,9 +7235,11 @@ TF_TOOLS: list[Tool] = [
         name="terraform_plan",
         description=(
             "Preview Terraform changes without applying. Shows what resources "
-            "will be created, modified, or destroyed. Returns structured JSON plan."
+            "will be created, modified, or destroyed. Returns structured JSON plan. "
+            "Requires LM_ENABLE_WRITE_OPERATIONS=true, since providers and data "
+            "sources run against live APIs."
         ),
-        annotations=_READ_ONLY,
+        annotations=_WRITE,
         inputSchema={
             "type": "object",
             "properties": {
@@ -7243,7 +7253,7 @@ TF_TOOLS: list[Tool] = [
                 },
                 "var_file": {
                     "type": "string",
-                    "description": "Path to a .tfvars file relative to workspace",
+                    "description": "Path to a .tfvars file inside the workspace (relative to it)",
                 },
                 "target": {
                     "type": "string",
@@ -7327,7 +7337,7 @@ TF_TOOLS: list[Tool] = [
                 },
                 "var_file": {
                     "type": "string",
-                    "description": "Path to a .tfvars file relative to workspace",
+                    "description": "Path to a .tfvars file inside the workspace (relative to it)",
                 },
                 "target": {
                     "type": "string",

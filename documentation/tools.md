@@ -514,9 +514,9 @@ Terraform Infrastructure as Code management for any provider
 
 | Tool | Description | Write |
 |------|-------------|-------|
-| `terraform_init` | Initialize a Terraform workspace and download required providers. Run this before plan, apply, or any other terraform operation. | No |
+| `terraform_init` | Initialize a Terraform workspace and download required providers. Run this before plan, apply, or any other terraform operation. Requires LM_ENABLE_WRITE_OPERATIONS=true. | Yes |
 | `terraform_validate` | Validate Terraform configuration syntax in a workspace. Returns validation diagnostics as structured JSON. | No |
-| `terraform_plan` | Preview Terraform changes without applying. Shows what resources will be created, modified, or destroyed. Returns structured JSON plan. | No |
+| `terraform_plan` | Preview Terraform changes without applying. Shows what resources will be created, modified, or destroyed. Returns structured JSON plan. Requires LM_ENABLE_WRITE_OPERATIONS=true, since providers and data sources run against live APIs. | Yes |
 | `terraform_state_list` | List all resources currently tracked in Terraform state for a workspace. | No |
 | `terraform_state_show` | Show detailed Terraform state for a specific resource, including all attributes and metadata. | No |
 | `terraform_output` | Show Terraform output values defined in the configuration. | No |

@@ -6,12 +6,42 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
+import signal
 from dataclasses import dataclass
 from pathlib import Path
 
 from lm_mcp.exceptions import LMError
 
 logger = logging.getLogger(__name__)
+
+# Variables the subprocess inherits from the server environment, besides TF_*:
+# the process basics, plus the proxy and CA settings terraform init needs to reach
+# the provider registry from behind an egress proxy or a private CA. Everything
+# else, server and cloud credentials included, stays out of terraform's reach;
+# provider credentials arrive explicitly through env_extra.
+_INHERITED_ENV = frozenset(
+    {
+        "PATH",
+        "HOME",
+        "TMPDIR",
+        "HTTP_PROXY",
+        "HTTPS_PROXY",
+        "NO_PROXY",
+        "http_proxy",
+        "https_proxy",
+        "no_proxy",
+        "SSL_CERT_FILE",
+        "SSL_CERT_DIR",
+    }
+)
+
+# Seconds a timed-out terraform gets after SIGINT to finish in-flight provider
+# calls, write state and release its lock before it is killed.
+_INTERRUPT_GRACE_SECONDS = 30
+
+# Commands that change state, where an interrupted run can leave a held lock and
+# resources the state does not record.
+_STATE_CHANGING_COMMANDS = frozenset({"apply", "destroy"})
 
 
 @dataclass
@@ -33,8 +63,8 @@ class TerraformRunner:
     """Async subprocess wrapper for the Terraform CLI.
 
     Manages workspace directories under a root directory, executes terraform
-    commands with configurable timeouts, and passes credentials via environment
-    variables (never written to disk).
+    commands with configurable timeouts, and passes credentials via an
+    allowlisted subprocess environment (never written to disk).
     """
 
     def __init__(
@@ -84,9 +114,10 @@ class TerraformRunner:
     ) -> TerraformResult:
         """Execute a terraform command in a workspace directory.
 
-        Creates the workspace subdirectory if it does not exist. Passes
-        env_extra variables (typically LM credentials as TF_VAR_*) into the
-        subprocess environment without writing them to disk.
+        Creates the workspace subdirectory if it does not exist. The subprocess
+        inherits only _INHERITED_ENV (process basics, proxy and CA settings) and
+        TF_* from the server environment, plus env_extra (typically LM provider
+        credentials), never written to disk.
 
         Args:
             args: Terraform subcommand and flags (e.g., ["plan", "-json"]).
@@ -103,8 +134,11 @@ class TerraformRunner:
         ws_path = self.workspace_path(workspace)
         ws_path.mkdir(parents=True, exist_ok=True)
 
-        # Build subprocess environment from current env plus extras
-        env = dict(os.environ)
+        env = {
+            name: value
+            for name, value in os.environ.items()
+            if name in _INHERITED_ENV or name.startswith("TF_")
+        }
         if env_extra:
             env.update(env_extra)
 
@@ -134,14 +168,23 @@ class TerraformRunner:
                 suggestion=("Install Terraform: https://developer.hashicorp.com/terraform/install"),
             ) from exc
         except TimeoutError:
-            proc.kill()
-            await proc.wait()
+            await self._interrupt(proc)
+            message = f"Terraform command timed out after {self.timeout}s: {' '.join(args)}"
+            suggestion = (
+                f"Increase TF_TIMEOUT (current: {self.timeout}s) or simplify the configuration."
+            )
+            if args and args[0] in _STATE_CHANGING_COMMANDS:
+                message += (
+                    ". It was interrupted mid-run: the state lock may still be held, and "
+                    "resources changed before the interrupt may be missing from state."
+                )
+                suggestion = (
+                    "Run terraform_plan to see what state is missing. If the state is still "
+                    "locked, release it with terraform force-unlock <LOCK_ID> once no other "
+                    f"run holds it. {suggestion}"
+                )
             raise LMError(
-                message=(f"Terraform command timed out after {self.timeout}s: {' '.join(args)}"),
-                code="TERRAFORM_TIMEOUT",
-                suggestion=(
-                    f"Increase TF_TIMEOUT (current: {self.timeout}s) or simplify the configuration."
-                ),
+                message=message, code="TERRAFORM_TIMEOUT", suggestion=suggestion
             ) from None
 
         stdout = stdout_bytes.decode("utf-8", errors="replace")
@@ -159,6 +202,32 @@ class TerraformRunner:
             stdout=stdout,
             stderr=stderr,
         )
+
+    @staticmethod
+    async def _interrupt(proc: asyncio.subprocess.Process) -> None:
+        """Stop a timed-out terraform: SIGINT, a grace period, then SIGKILL.
+
+        SIGINT is terraform's signal to finish in-flight operations, persist state
+        and release its lock; killing it outright skips all three.
+        """
+        try:
+            proc.send_signal(signal.SIGINT)
+        except ProcessLookupError:
+            logger.debug("terraform exited before it could be interrupted")
+            return
+        try:
+            await asyncio.wait_for(proc.wait(), timeout=_INTERRUPT_GRACE_SECONDS)
+            return
+        except TimeoutError:
+            logger.warning(
+                "terraform did not stop within %ss of SIGINT; killing it",
+                _INTERRUPT_GRACE_SECONDS,
+            )
+        try:
+            proc.kill()
+        except ProcessLookupError:
+            logger.debug("terraform exited before it could be killed")
+        await proc.wait()
 
     async def close(self) -> None:
         """Clean up resources. No-op for subprocess runner, matches client interface."""

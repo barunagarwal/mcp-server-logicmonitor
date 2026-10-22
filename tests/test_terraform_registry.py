@@ -58,9 +58,7 @@ class TestTerraformToolRegistry:
     def test_read_tools_marked_readonly(self):
         """Read-only TF tools have readOnlyHint=True."""
         read_tools = {
-            "terraform_init",
             "terraform_validate",
-            "terraform_plan",
             "terraform_state_list",
             "terraform_state_show",
             "terraform_output",
@@ -74,6 +72,8 @@ class TestTerraformToolRegistry:
     def test_write_tools_not_readonly(self):
         """Write TF tools have readOnlyHint=False."""
         write_tools = {
+            "terraform_init",
+            "terraform_plan",
             "terraform_apply",
             "terraform_destroy",
             "terraform_import",

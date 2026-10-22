@@ -46,7 +46,8 @@ def _reload_config(monkeypatch, *, writes_enabled: bool = False):
 
 class TestTerraformInit:
     @pytest.mark.asyncio
-    async def test_init_success(self, mock_runner):
+    async def test_init_success(self, mock_runner, monkeypatch):
+        _reload_config(monkeypatch, writes_enabled=True)
         from lm_mcp.tools.terraform import terraform_init
 
         mock_runner.run = AsyncMock(
@@ -58,7 +59,8 @@ class TestTerraformInit:
         assert data["workspace"] == "prod"
 
     @pytest.mark.asyncio
-    async def test_init_failure(self, mock_runner):
+    async def test_init_failure(self, mock_runner, monkeypatch):
+        _reload_config(monkeypatch, writes_enabled=True)
         from lm_mcp.tools.terraform import terraform_init
 
         mock_runner.run = AsyncMock(
@@ -67,6 +69,17 @@ class TestTerraformInit:
         result = await terraform_init(mock_runner, workspace="bad")
         data = json.loads(result[0].text)
         assert data["success"] is False
+
+    @pytest.mark.asyncio
+    async def test_write_disabled(self, mock_runner, monkeypatch):
+        """R3.4: init downloads providers and runs backend code, so writes must be on."""
+        _reload_config(monkeypatch, writes_enabled=False)
+        from lm_mcp.tools.terraform import terraform_init
+
+        mock_runner.run = AsyncMock()
+        result = await terraform_init(mock_runner, workspace="prod")
+        assert "write operations are disabled" in result[0].text.lower()
+        mock_runner.run.assert_not_called()
 
 
 # ---------------------------------------------------------------------------
@@ -113,7 +126,8 @@ class TestTerraformValidate:
 
 class TestTerraformPlan:
     @pytest.mark.asyncio
-    async def test_no_changes(self, mock_runner):
+    async def test_no_changes(self, mock_runner, monkeypatch):
+        _reload_config(monkeypatch, writes_enabled=True)
         from lm_mcp.tools.terraform import terraform_plan
 
         mock_runner.run = AsyncMock(return_value=TerraformResult(exit_code=0, stdout="", stderr=""))
@@ -123,7 +137,44 @@ class TestTerraformPlan:
         assert data["has_changes"] is False
 
     @pytest.mark.asyncio
-    async def test_changes_pending(self, mock_runner):
+    async def test_write_disabled(self, mock_runner, monkeypatch):
+        """R3.4: plan evaluates data sources against live APIs, so writes must be on."""
+        _reload_config(monkeypatch, writes_enabled=False)
+        from lm_mcp.tools.terraform import terraform_plan
+
+        mock_runner.run = AsyncMock()
+        result = await terraform_plan(mock_runner, workspace="prod")
+        assert "write operations are disabled" in result[0].text.lower()
+        mock_runner.run.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_provider_credentials_passed_explicitly(self, mock_runner, monkeypatch):
+        """The LM provider's variables go through env_extra; the bearer token never does."""
+        monkeypatch.setenv("LM_PORTAL", "acme.logicmonitor.com")
+        monkeypatch.delenv("LM_BEARER_TOKEN", raising=False)
+        monkeypatch.setenv("LM_ACCESS_ID", "lmv1-id")
+        monkeypatch.setenv("LM_ACCESS_KEY", "lmv1-key")
+        monkeypatch.setenv("LM_ENABLE_WRITE_OPERATIONS", "true")
+        from lm_mcp.config import reset_config
+
+        reset_config()
+        from lm_mcp.tools.terraform import terraform_plan
+
+        mock_runner.run = AsyncMock(return_value=TerraformResult(exit_code=0, stdout="", stderr=""))
+        await terraform_plan(mock_runner, workspace="prod")
+
+        assert mock_runner.run.call_args.kwargs["env_extra"] == {
+            "LM_COMPANY": "acme",
+            "TF_VAR_lm_company": "acme",
+            "LM_API_ID": "lmv1-id",
+            "TF_VAR_lm_api_id": "lmv1-id",
+            "LM_API_KEY": "lmv1-key",
+            "TF_VAR_lm_api_key": "lmv1-key",
+        }
+
+    @pytest.mark.asyncio
+    async def test_changes_pending(self, mock_runner, monkeypatch):
+        _reload_config(monkeypatch, writes_enabled=True)
         from lm_mcp.tools.terraform import terraform_plan
 
         plan_line = json.dumps({"type": "planned_change", "change": {"action": "create"}})
@@ -136,7 +187,8 @@ class TestTerraformPlan:
         assert data["has_changes"] is True
 
     @pytest.mark.asyncio
-    async def test_plan_error(self, mock_runner):
+    async def test_plan_error(self, mock_runner, monkeypatch):
+        _reload_config(monkeypatch, writes_enabled=True)
         from lm_mcp.tools.terraform import terraform_plan
 
         mock_runner.run = AsyncMock(
@@ -499,6 +551,142 @@ class TestTerraformGenerate:
         data = json.loads(result[0].text)
         assert "logicmonitor_sdt" in data["hcl"]
         assert "# Generated from LM API" in data["hcl"]
+
+
+# ---------------------------------------------------------------------------
+# var_file and backend_config confinement (R3.4)
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture
+def real_runner(tmp_path):
+    """A TerraformRunner on a real workspace root, with run() stubbed."""
+    from lm_mcp.client.terraform import TerraformRunner
+
+    runner = TerraformRunner(workspace_dir=str(tmp_path / "root"), auto_approve_enabled=True)
+    runner.workspace_path("prod").mkdir(parents=True)
+    runner.run = AsyncMock(return_value=TerraformResult(exit_code=0, stdout="", stderr=""))
+    return runner
+
+
+class TestVarFileConfinement:
+    @pytest.mark.asyncio
+    async def test_plan_traversal_is_refused_before_run(self, real_runner, monkeypatch):
+        _reload_config(monkeypatch, writes_enabled=True)
+        from lm_mcp.tools.terraform import terraform_plan
+
+        result = await terraform_plan(real_runner, workspace="prod", var_file="../../etc/passwd")
+
+        assert "var_file" in result[0].text
+        assert "escapes the workspace" in result[0].text
+        real_runner.run.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_plan_file_inside_workspace_is_passed_through(self, real_runner, monkeypatch):
+        _reload_config(monkeypatch, writes_enabled=True)
+        from lm_mcp.tools.terraform import terraform_plan
+
+        await terraform_plan(real_runner, workspace="prod", var_file="vars/prod.tfvars")
+
+        args = real_runner.run.call_args.args[0]
+        assert args[args.index("-var-file") + 1] == "vars/prod.tfvars"
+
+    @pytest.mark.asyncio
+    async def test_symlink_out_of_the_workspace_is_refused(
+        self, real_runner, monkeypatch, tmp_path
+    ):
+        _reload_config(monkeypatch, writes_enabled=True)
+        from lm_mcp.tools.terraform import terraform_plan
+
+        outside = tmp_path / "secret.tfvars"
+        outside.write_text('token = "x"\n')
+        (real_runner.workspace_path("prod") / "link.tfvars").symlink_to(outside)
+
+        result = await terraform_plan(real_runner, workspace="prod", var_file="link.tfvars")
+
+        assert "escapes the workspace" in result[0].text
+        real_runner.run.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_apply_traversal_is_refused_before_run(self, real_runner, monkeypatch):
+        _reload_config(monkeypatch, writes_enabled=True)
+        from lm_mcp.tools.terraform import terraform_apply
+
+        result = await terraform_apply(
+            real_runner, workspace="prod", var_file="/etc/passwd", confirm=True
+        )
+
+        assert "escapes the workspace" in result[0].text
+        real_runner.run.assert_not_called()
+
+
+class TestBackendConfigAllowlist:
+    @pytest.mark.asyncio
+    async def test_unlisted_key_is_refused_and_named(self, real_runner, monkeypatch):
+        _reload_config(monkeypatch, writes_enabled=True)
+        from lm_mcp.tools.terraform import terraform_init
+
+        result = await terraform_init(
+            real_runner,
+            workspace="prod",
+            backend_config={"path": "x", "address": "http://evil"},
+        )
+
+        assert "'address'" in result[0].text
+        assert "'path'" not in result[0].text
+        real_runner.run.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_endpoint_override_is_refused(self, real_runner, monkeypatch):
+        """A documented s3 key that redirects state traffic is still refused."""
+        _reload_config(monkeypatch, writes_enabled=True)
+        from lm_mcp.tools.terraform import terraform_init
+
+        result = await terraform_init(
+            real_runner,
+            workspace="prod",
+            backend_config={"bucket": "b", "endpoint": "https://evil.example"},
+        )
+
+        assert "'endpoint'" in result[0].text
+        real_runner.run.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_allowed_keys_pass_as_separate_flags(self, real_runner, monkeypatch):
+        _reload_config(monkeypatch, writes_enabled=True)
+        from lm_mcp.tools.terraform import terraform_init
+
+        await terraform_init(
+            real_runner,
+            workspace="prod",
+            backend_config={"bucket": "state", "key": "lm/prod.tfstate", "region": "us-east-1"},
+        )
+
+        args = real_runner.run.call_args.args[0]
+        assert args[:2] == ["init", "-no-color"]
+        assert args[2:] == [
+            "-backend-config",
+            "bucket=state",
+            "-backend-config",
+            "key=lm/prod.tfstate",
+            "-backend-config",
+            "region=us-east-1",
+        ]
+
+    @pytest.mark.asyncio
+    async def test_local_state_path_outside_the_workspace_is_refused(
+        self, real_runner, monkeypatch
+    ):
+        """The local backend's path writes state there, so it stays in the workspace."""
+        _reload_config(monkeypatch, writes_enabled=True)
+        from lm_mcp.tools.terraform import terraform_init
+
+        result = await terraform_init(
+            real_runner, workspace="prod", backend_config={"path": "../../../home/x/.bashrc"}
+        )
+
+        assert "escapes the workspace" in result[0].text
+        real_runner.run.assert_not_called()
 
 
 # ---------------------------------------------------------------------------

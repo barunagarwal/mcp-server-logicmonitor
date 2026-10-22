@@ -66,6 +66,14 @@ class TestWriteToolPrefixDetection:
         assert is_write_tool("recover_device")
         assert is_write_tool("collect_device_config")
 
+    def test_write_gated_terraform_tools_are_audited(self):
+        """terraform_init and terraform_plan are write-gated, so they are audited too."""
+        from lm_mcp.logging import is_write_tool
+
+        assert is_write_tool("terraform_init")
+        assert is_write_tool("terraform_plan")
+        assert not is_write_tool("terraform_validate")
+
 
 class TestAwxWriteToolPrefixes:
     """Tests for AWX write tool prefix detection."""
