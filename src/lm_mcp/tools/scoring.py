@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import logging
 import math
 import time
 from collections import defaultdict
@@ -29,6 +30,8 @@ from lm_mcp.tools.stats_helpers import (
 if TYPE_CHECKING:
     from lm_mcp.client import LogicMonitorClient
 
+logger = logging.getLogger(__name__)
+
 
 async def score_alert_noise(
     client: LogicMonitorClient,
@@ -50,14 +53,15 @@ async def score_alert_noise(
 
     Returns:
         Noise score with entropy, flapping alerts, and recommendations;
-        truncated says whether the 5000-alert cap cut the window short and
-        api_total is the API's count, null when it reported only a lower bound.
+        truncated says whether the 5000-alert cap cut the active or the cleared
+        read short and api_total is the sum of both reads' API counts, null
+        when either reported only a lower bound.
     """
     try:
         now_epoch = int(time.time())
         start_epoch = now_epoch - (hours_back * 3600)
 
-        # Fetch the window's alerts; with no cleared filter the list holds active alerts only
+        # Fetch the window's active and cleared alerts; flap detection needs the cleared ones
         filters = [f"startEpoch>:{start_epoch}"]
         if device:
             clean_val, _ = sanitize_filter_value(device)
@@ -65,7 +69,7 @@ async def score_alert_noise(
         if group_id is not None:
             filters.append(await resolve_group_filter(client, group_id))
 
-        alerts, truncated, api_total = await paginate_alerts(client, ",".join(filters))
+        alerts, truncated, api_total = await _read_cleared_and_active(client, ",".join(filters))
 
         if not alerts:
             return format_response(
@@ -122,8 +126,9 @@ async def score_alert_noise(
                 curr = sorted_events[i]
                 prev_end = prev.get("endEpoch", 0)
                 curr_start = curr.get("startEpoch", 0)
-                # endEpoch=0 means still active, skip for flap detection
-                if prev_end > 0 and curr_start - prev_end < 1800:
+                # endEpoch=0 means still active, skip for flap detection; an alert
+                # that starts before the previous one cleared overlaps it, no re-fire
+                if prev_end > 0 and 0 <= curr_start - prev_end < 1800:
                     flap_count += 1
                     if len(flapping_alerts) < 10:
                         flapping_alerts.append(
@@ -211,8 +216,7 @@ async def calculate_availability(
 ) -> list[TextContent]:
     """Calculate availability percentage from alert history.
 
-    Fetches active alerts at or above the severity threshold (the alert list
-    returns cleared alerts only under a cleared:true filter),
+    Fetches cleared and active alerts at or above the severity threshold,
     computes downtime windows, merges overlapping incidents, and calculates
     SLA-style availability metrics.
 
@@ -277,7 +281,7 @@ async def calculate_availability(
         # reads its own alert list, which keeps alerts recorded under an
         # earlier display name.
         alert_path = "/alert/alerts" if device is None else f"/device/devices/{device['id']}/alerts"
-        alerts, truncated, api_total = await paginate_alerts(
+        alerts, truncated, api_total = await _read_cleared_and_active(
             client, ",".join(filters), path=alert_path
         )
 
@@ -392,6 +396,40 @@ async def calculate_availability(
         return handle_error(e)
 
 
+async def _read_cleared_and_active(
+    client: LogicMonitorClient,
+    filter_str: str,
+    path: str = "/alert/alerts",
+) -> tuple[list[dict], bool, int | None]:
+    """Read a window's active and cleared alerts as one list.
+
+    Both alert lists return active alerts only unless the filter carries
+    cleared:true, so the window takes two reads, each under the alert cap. An
+    alert that clears between the reads appears in both and is kept once, as
+    the cleared copy, which carries its endEpoch.
+
+    Args:
+        client: LogicMonitor API client.
+        filter_str: Filter string for the active read; the cleared read adds
+            cleared:true to it.
+        path: Alert list to read, as paginate_alerts takes it.
+
+    Returns:
+        The alerts, whether the cap cut either read short, and the sum of both
+        API totals, or None when either reported only a lower bound.
+    """
+    active, active_cut, active_total = await paginate_alerts(client, filter_str, path=path)
+    cleared, cleared_cut, cleared_total = await paginate_alerts(
+        client, f"{filter_str},cleared:true", path=path
+    )
+    cleared_ids = {alert["id"] for alert in cleared if alert.get("id") is not None}
+    alerts = [alert for alert in active if alert.get("id") not in cleared_ids] + cleared
+    api_total = (
+        None if active_total is None or cleared_total is None else active_total + cleared_total
+    )
+    return alerts, active_cut or cleared_cut, api_total
+
+
 async def _resolve_device(
     client: LogicMonitorClient,
     device_id: int | None,
@@ -426,6 +464,7 @@ async def _resolve_device(
     except NotFoundError:
         found = None
     except LMError as exc:
+        logger.warning("Could not look up %s for availability", target, exc_info=True)
         return {
             "error": True,
             "code": "DEVICE_LOOKUP_FAILED",

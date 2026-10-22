@@ -4793,7 +4793,9 @@ TOOLS.extend(
             description=(
                 "Score alert noise level using Shannon entropy and flap detection. "
                 "Produces a score from 0 (quiet) to 100 (extremely noisy) with "
-                "recommendations for tuning."
+                "recommendations for tuning. Reads the window's cleared and active "
+                "alerts, so a cleared alert that re-fires counts as a flap; "
+                "truncated says when the 5000-alert cap cut either read short."
             ),
             annotations=_READ_ONLY,
             inputSchema={
@@ -4860,7 +4862,9 @@ TOOLS.extend(
             description=(
                 "Calculate availability percentage from alert history. "
                 "Computes SLA-style uptime metrics, MTTR, and per-device "
-                "breakdown from cleared and active alerts."
+                "breakdown from the window's cleared and active alerts, read as "
+                "two lists; truncated says when the 5000-alert cap cut either "
+                "read short."
                 "\n\nCommon mistakes: hours_back defaults to 720 (30 days). "
                 "Narrow scope with device_id/group_id for performance."
             ),

@@ -1,7 +1,17 @@
-# Description: Paged /alert/alerts responder for respx, shaped on the portal's paging.
-# Description: Serves size/offset slices with an exact total or the portal's lower-bound total.
+# Description: Paged /alert/alerts responders for respx, shaped on the portal's paging.
+# Description: Serves size/offset slices, and routes cleared:true reads to their own list.
 
 import httpx
+
+
+def _page(alerts: list[dict], request: httpx.Request, lower_bound: bool) -> httpx.Response:
+    """Serve the slice of alerts the request's size and offset name."""
+    size = int(request.url.params.get("size", 50))
+    offset = int(request.url.params.get("offset", 0))
+    page = alerts[offset : offset + size]
+    more = lower_bound and offset + size < len(alerts)
+    total = -(offset + size + 1) if more else len(alerts)
+    return httpx.Response(200, json={"items": page, "total": total})
 
 
 def alert_pages(alerts: list[dict], lower_bound: bool = False):
@@ -15,11 +25,33 @@ def alert_pages(alerts: list[dict], lower_bound: bool = False):
     """
 
     def respond(request: httpx.Request) -> httpx.Response:
-        size = int(request.url.params.get("size", 50))
-        offset = int(request.url.params.get("offset", 0))
-        page = alerts[offset : offset + size]
-        more = lower_bound and offset + size < len(alerts)
-        total = -(offset + size + 1) if more else len(alerts)
-        return httpx.Response(200, json={"items": page, "total": total})
+        return _page(alerts, request, lower_bound)
+
+    return respond
+
+
+def alert_lists(
+    active: list[dict],
+    cleared: list[dict] | None = None,
+    lower_bound: bool = False,
+    cleared_lower_bound: bool | None = None,
+):
+    """Return a respx side effect that serves active and cleared alerts as two lists.
+
+    Both alert lists return active alerts only unless the filter carries
+    cleared:true (probe of lmryanmatuszewski, 2026-10-22), so a request whose
+    filter holds that clause reads the cleared list and any other the active
+    one, each paged as alert_pages pages. cleared_lower_bound defaults to
+    lower_bound.
+    """
+    cleared = cleared or []
+    if cleared_lower_bound is None:
+        cleared_lower_bound = lower_bound
+
+    def respond(request: httpx.Request) -> httpx.Response:
+        clauses = request.url.params.get("filter", "").split(",")
+        if "cleared:true" in clauses:
+            return _page(cleared, request, cleared_lower_bound)
+        return _page(active, request, lower_bound)
 
     return respond

@@ -2,6 +2,7 @@
 # Description: Validates scoring, availability, health, and error budget tools.
 
 import json
+import logging
 import time
 
 import httpx
@@ -10,7 +11,7 @@ import respx
 
 from lm_mcp.auth.bearer import BearerAuth
 from lm_mcp.client import LogicMonitorClient
-from tests.alert_pages import alert_pages
+from tests.alert_pages import alert_lists
 
 
 @pytest.fixture
@@ -80,12 +81,7 @@ class TestScoreAlertNoise:
         """Single alert produces low noise score."""
         from lm_mcp.tools.scoring import score_alert_noise
 
-        respx.get(ALERT_URL).mock(
-            return_value=httpx.Response(
-                200,
-                json={"items": [_make_alert(1, "s1", "CPU")], "total": 1},
-            )
-        )
+        respx.get(ALERT_URL).mock(side_effect=alert_lists([_make_alert(1, "s1", "CPU")]))
 
         result = await score_alert_noise(client)
 
@@ -116,12 +112,7 @@ class TestScoreAlertNoise:
                 start_epoch=BASE_EPOCH + 600,
             ),
         ]
-        respx.get(ALERT_URL).mock(
-            return_value=httpx.Response(
-                200,
-                json={"items": alerts, "total": 2},
-            )
-        )
+        respx.get(ALERT_URL).mock(side_effect=alert_lists(alerts))
 
         result = await score_alert_noise(client)
 
@@ -137,12 +128,7 @@ class TestScoreAlertNoise:
         alerts = [
             _make_alert(i, "s1", "CPU", "value", start_epoch=BASE_EPOCH + i * 60) for i in range(10)
         ]
-        respx.get(ALERT_URL).mock(
-            return_value=httpx.Response(
-                200,
-                json={"items": alerts, "total": 10},
-            )
-        )
+        respx.get(ALERT_URL).mock(side_effect=alert_lists(alerts))
 
         result = await score_alert_noise(client)
 
@@ -161,12 +147,7 @@ class TestScoreAlertNoise:
             _make_alert(3, "noisy-server", "Disk"),
             _make_alert(4, "quiet-server", "CPU"),
         ]
-        respx.get(ALERT_URL).mock(
-            return_value=httpx.Response(
-                200,
-                json={"items": alerts, "total": 4},
-            )
-        )
+        respx.get(ALERT_URL).mock(side_effect=alert_lists(alerts))
 
         result = await score_alert_noise(client)
 
@@ -185,12 +166,7 @@ class TestScoreAlertNoise:
             _make_alert(3, "s3", "CPU"),
             _make_alert(4, "s1", "Memory"),
         ]
-        respx.get(ALERT_URL).mock(
-            return_value=httpx.Response(
-                200,
-                json={"items": alerts, "total": 4},
-            )
-        )
+        respx.get(ALERT_URL).mock(side_effect=alert_lists(alerts))
 
         result = await score_alert_noise(client)
 
@@ -274,12 +250,7 @@ class TestScoreAlertNoise:
 
         # Many diverse alerts to push entropy up
         alerts = [_make_alert(i, f"server{i}", f"DS{i}", f"dp{i}") for i in range(50)]
-        respx.get(ALERT_URL).mock(
-            return_value=httpx.Response(
-                200,
-                json={"items": alerts, "total": 50},
-            )
-        )
+        respx.get(ALERT_URL).mock(side_effect=alert_lists(alerts))
 
         result = await score_alert_noise(client)
 
@@ -300,12 +271,7 @@ class TestScoreAlertNoise:
             )
             for i in range(5)
         ]
-        respx.get(ALERT_URL).mock(
-            return_value=httpx.Response(
-                200,
-                json={"items": alerts, "total": 15},
-            )
-        )
+        respx.get(ALERT_URL).mock(side_effect=alert_lists(alerts))
 
         result = await score_alert_noise(client)
 
@@ -330,12 +296,7 @@ class TestScoreAlertNoise:
             )
             for i in range(20)
         ]
-        respx.get(ALERT_URL).mock(
-            return_value=httpx.Response(
-                200,
-                json={"items": alerts, "total": 20},
-            )
-        )
+        respx.get(ALERT_URL).mock(side_effect=alert_lists(alerts))
 
         result = await score_alert_noise(client)
 
@@ -380,12 +341,7 @@ class TestCalculateAvailability:
                 cleared=True,
             ),
         ]
-        respx.get(ALERT_URL).mock(
-            return_value=httpx.Response(
-                200,
-                json={"items": alerts, "total": 1},
-            )
-        )
+        respx.get(ALERT_URL).mock(side_effect=alert_lists(alerts))
 
         result = await calculate_availability(client, hours_back=24)
 
@@ -421,12 +377,7 @@ class TestCalculateAvailability:
                 cleared=True,
             ),
         ]
-        respx.get(ALERT_URL).mock(
-            return_value=httpx.Response(
-                200,
-                json={"items": alerts, "total": 2},
-            )
-        )
+        respx.get(ALERT_URL).mock(side_effect=alert_lists(alerts))
 
         result = await calculate_availability(client, hours_back=24)
 
@@ -451,12 +402,7 @@ class TestCalculateAvailability:
                 end_epoch=0,
             ),
         ]
-        respx.get(ALERT_URL).mock(
-            return_value=httpx.Response(
-                200,
-                json={"items": alerts, "total": 1},
-            )
-        )
+        respx.get(ALERT_URL).mock(side_effect=alert_lists(alerts))
 
         result = await calculate_availability(client, hours_back=24)
 
@@ -490,12 +436,7 @@ class TestCalculateAvailability:
                 cleared=True,
             ),
         ]
-        respx.get(ALERT_URL).mock(
-            return_value=httpx.Response(
-                200,
-                json={"items": alerts, "total": 2},
-            )
-        )
+        respx.get(ALERT_URL).mock(side_effect=alert_lists(alerts))
 
         result = await calculate_availability(client, hours_back=24)
 
@@ -529,12 +470,7 @@ class TestCalculateAvailability:
                 cleared=True,
             ),
         ]
-        respx.get(ALERT_URL).mock(
-            return_value=httpx.Response(
-                200,
-                json={"items": alerts, "total": 2},
-            )
-        )
+        respx.get(ALERT_URL).mock(side_effect=alert_lists(alerts))
 
         result = await calculate_availability(client, hours_back=24)
 
@@ -572,12 +508,7 @@ class TestCalculateAvailability:
                 cleared=True,
             ),
         ]
-        respx.get(ALERT_URL).mock(
-            return_value=httpx.Response(
-                200,
-                json={"items": alerts, "total": 1},
-            )
-        )
+        respx.get(ALERT_URL).mock(side_effect=alert_lists(alerts))
 
         result = await calculate_availability(client, hours_back=24)
 
@@ -624,7 +555,7 @@ class TestCalculateAvailability:
         result = await calculate_availability(client, device_id=42)
 
         assert json.loads(result[0].text)["device_id"] == 42
-        assert route.call_count == 1
+        assert route.call_count == 2  # the active read, then the cleared read
         clauses = route.calls[0].request.url.params["filter"].split(",")
         assert clauses[0].startswith("startEpoch>:")
         assert clauses[1:] == ["severity>:3"]
@@ -647,9 +578,7 @@ class TestCalculateAvailability:
 
         # The device-scoped endpoint returns only the target's alerts
         alerts = [_device_alert("A1", 100, "target-server", recent, recent + 300)]
-        respx.get(DEVICE_ALERTS_URL_TEMPLATE.format(id=100)).mock(
-            return_value=httpx.Response(200, json={"items": alerts, "total": 1})
-        )
+        respx.get(DEVICE_ALERTS_URL_TEMPLATE.format(id=100)).mock(side_effect=alert_lists(alerts))
 
         result = await calculate_availability(client, device_id=100, hours_back=24)
         data = json.loads(result[0].text)
@@ -912,12 +841,7 @@ class TestScoringGuardrails:
                     start_epoch=BASE_EPOCH + i * 60 + 60,
                 )
             )
-        respx.get(ALERT_URL).mock(
-            return_value=httpx.Response(
-                200,
-                json={"items": alerts, "total": len(alerts)},
-            )
-        )
+        respx.get(ALERT_URL).mock(side_effect=alert_lists(alerts))
 
         result = await score_alert_noise(client)
         data = json.loads(result[0].text)
@@ -937,12 +861,7 @@ class TestScoringGuardrails:
         """Low noise score omits anti_patterns key."""
         from lm_mcp.tools.scoring import score_alert_noise
 
-        respx.get(ALERT_URL).mock(
-            return_value=httpx.Response(
-                200,
-                json={"items": [_make_alert(1, "s1", "CPU")], "total": 1},
-            )
-        )
+        respx.get(ALERT_URL).mock(side_effect=alert_lists([_make_alert(1, "s1", "CPU")]))
 
         result = await score_alert_noise(client)
         data = json.loads(result[0].text)
@@ -1031,12 +950,7 @@ class TestScoringGuardrails:
                 cleared=True,
             ),
         ]
-        respx.get(ALERT_URL).mock(
-            return_value=httpx.Response(
-                200,
-                json={"items": alerts, "total": 1},
-            )
-        )
+        respx.get(ALERT_URL).mock(side_effect=alert_lists(alerts))
 
         result = await calculate_availability(client, hours_back=24)
 
@@ -1077,20 +991,16 @@ class TestCalculateErrorBudget:
         start_epoch = now_epoch - (30 * 24 * 3600)
 
         respx.get(ALERT_URL).mock(
-            return_value=httpx.Response(
-                200,
-                json={
-                    "items": [
-                        {
-                            "id": "a1",
-                            "severity": 3,
-                            "monitorObjectName": "server1",
-                            "startEpoch": start_epoch + 1000,
-                            "endEpoch": start_epoch + 4600,  # 60 min downtime
-                        },
-                    ],
-                    "total": 1,
-                },
+            side_effect=alert_lists(
+                [
+                    {
+                        "id": "a1",
+                        "severity": 3,
+                        "monitorObjectName": "server1",
+                        "startEpoch": start_epoch + 1000,
+                        "endEpoch": start_epoch + 4600,  # 60 min downtime
+                    },
+                ]
             )
         )
 
@@ -1111,20 +1021,16 @@ class TestCalculateErrorBudget:
 
         # 99.9% SLO over 30 days = 43.2 min budget. Create 100 min downtime.
         respx.get(ALERT_URL).mock(
-            return_value=httpx.Response(
-                200,
-                json={
-                    "items": [
-                        {
-                            "id": "a1",
-                            "severity": 3,
-                            "monitorObjectName": "server1",
-                            "startEpoch": start_epoch + 1000,
-                            "endEpoch": start_epoch + 7000,  # 100 min
-                        },
-                    ],
-                    "total": 1,
-                },
+            side_effect=alert_lists(
+                [
+                    {
+                        "id": "a1",
+                        "severity": 3,
+                        "monitorObjectName": "server1",
+                        "startEpoch": start_epoch + 1000,
+                        "endEpoch": start_epoch + 7000,  # 100 min
+                    },
+                ]
             )
         )
 
@@ -1200,12 +1106,8 @@ class TestCalculateAvailabilityDeviceLookup:
         from lm_mcp.tools.scoring import calculate_availability
 
         respx.get(DEVICE_ALERTS_URL_TEMPLATE.format(id=100)).mock(
-            return_value=httpx.Response(
-                200,
-                json={
-                    "items": [_device_alert("a1", 100, "server1", int(time.time()) - 1000, 0)],
-                    "total": 1,
-                },
+            side_effect=alert_lists(
+                [_device_alert("a1", 100, "server1", int(time.time()) - 1000, 0)]
             )
         )
         respx.get(DEVICE_URL_TEMPLATE.format(id=100)).mock(
@@ -1285,7 +1187,7 @@ class TestScoreAlertNoisePaging:
             _make_alert(i, f"dev-{i % 5}", f"DS-{i % 3}", start_epoch=BASE_EPOCH + i)
             for i in range(2500)
         ]
-        respx.get(ALERT_URL).mock(side_effect=alert_pages(alerts, lower_bound=True))
+        respx.get(ALERT_URL).mock(side_effect=alert_lists(alerts, lower_bound=True))
 
         result = await score_alert_noise(client)
 
@@ -1302,7 +1204,7 @@ class TestScoreAlertNoisePaging:
         alerts = [
             _make_alert(i, f"dev-{i % 5}", "DS", start_epoch=BASE_EPOCH + i) for i in range(6000)
         ]
-        respx.get(ALERT_URL).mock(side_effect=alert_pages(alerts, lower_bound=True))
+        respx.get(ALERT_URL).mock(side_effect=alert_lists(alerts, lower_bound=True))
 
         result = await score_alert_noise(client)
 
@@ -1359,7 +1261,7 @@ class TestAvailabilityResolvesDevice:
             _device_alert(2, 5, "web-02", now - 3600, now - 3000),
         ]
         route = respx.get(DEVICE_ALERTS_URL_TEMPLATE.format(id=5)).mock(
-            side_effect=alert_pages(alerts)
+            side_effect=alert_lists(alerts)
         )
 
         result = await calculate_availability(client, device_id=5, hours_back=24)
@@ -1386,7 +1288,7 @@ class TestAvailabilityResolvesDevice:
             _device_alert(1, 5, "web-01", now - 7200, now - 6600),
             _device_alert(2, 5, "web-02", now - 3600, now - 3000),
         ]
-        respx.get(DEVICE_ALERTS_URL_TEMPLATE.format(id=5)).mock(side_effect=alert_pages(alerts))
+        respx.get(DEVICE_ALERTS_URL_TEMPLATE.format(id=5)).mock(side_effect=alert_lists(alerts))
 
         result = await calculate_availability(client, device_name="web-02", hours_back=24)
 
@@ -1424,7 +1326,7 @@ class TestAvailabilityResolvesDevice:
             )
             for i in range(6000)
         ]
-        respx.get(ALERT_URL).mock(side_effect=alert_pages(alerts, lower_bound=True))
+        respx.get(ALERT_URL).mock(side_effect=alert_lists(alerts, lower_bound=True))
 
         result = await calculate_availability(client, hours_back=24)
 
@@ -1524,3 +1426,184 @@ class TestAvailabilityDeviceWithGroup:
         data = json.loads(result[0].text)
         assert data["availability_percent"] == 100.0
         assert 'monitorObjectGroups~"Sites/East"' in route.calls[0].request.url.params["filter"]
+
+
+class TestClearedAlerts:
+    """R4.3: availability and noise read cleared alerts beside the active ones."""
+
+    @respx.mock
+    async def test_cleared_incident_counts_as_downtime(self, client):
+        from lm_mcp.tools.scoring import calculate_availability
+
+        now = int(time.time())
+        respx.get(DEVICE_URL_TEMPLATE.format(id=5)).mock(
+            return_value=httpx.Response(200, json={"id": 5, "displayName": "web-02"})
+        )
+        cleared = [_device_alert(1, 5, "web-02", now - 7200, now - 3600)]
+        respx.get(DEVICE_ALERTS_URL_TEMPLATE.format(id=5)).mock(
+            side_effect=alert_lists([], cleared)
+        )
+
+        result = await calculate_availability(client, device_id=5, hours_back=24)
+
+        data = json.loads(result[0].text)
+        assert data["incident_count"] == 1
+        assert data["total_downtime_minutes"] == 60.0
+        assert data["availability_percent"] < 100.0
+
+    @respx.mock
+    async def test_cleared_alert_and_refire_count_as_a_flap(self, client):
+        from lm_mcp.tools.scoring import score_alert_noise
+
+        cleared = [_make_alert(1, "s1", "CPU", start_epoch=BASE_EPOCH, end_epoch=BASE_EPOCH + 600)]
+        active = [_make_alert(2, "s1", "CPU", start_epoch=BASE_EPOCH + 1200)]
+        respx.get(ALERT_URL).mock(side_effect=alert_lists(active, cleared))
+
+        result = await score_alert_noise(client)
+
+        data = json.loads(result[0].text)
+        assert data["total_alerts"] == 2
+        assert data["flap_count"] == 1
+        assert data["flapping_alerts"][0]["gap_seconds"] == 600
+
+    @pytest.mark.parametrize(
+        ("second_start", "flaps"),
+        [(BASE_EPOCH + 600, 0), (BASE_EPOCH + 1200, 1)],
+        ids=["opens-before-the-clear", "re-fires-as-it-clears"],
+    )
+    @respx.mock
+    async def test_a_flap_needs_the_clear_before_the_refire(self, client, second_start, flaps):
+        from lm_mcp.tools.scoring import score_alert_noise
+
+        # An alert that opens while the previous one is still open overlaps it, so
+        # nothing cleared and re-fired; a live portal day held 660 such pairs among
+        # 4210 counted flaps. A re-fire in the second it cleared is a flap.
+        cleared = [
+            _make_alert(1, "s1", "CPU", start_epoch=BASE_EPOCH, end_epoch=BASE_EPOCH + 1200),
+            _make_alert(2, "s1", "CPU", start_epoch=second_start, end_epoch=BASE_EPOCH + 2400),
+        ]
+        respx.get(ALERT_URL).mock(side_effect=alert_lists([], cleared))
+
+        result = await score_alert_noise(client)
+
+        data = json.loads(result[0].text)
+        assert data["total_alerts"] == 2
+        assert data["flap_count"] == flaps
+        assert len(data["flapping_alerts"]) == flaps
+
+    @pytest.mark.parametrize(
+        ("call", "url"),
+        [
+            ("availability_portal", ALERT_URL),
+            ("availability_device", DEVICE_ALERTS_URL_TEMPLATE.format(id=5)),
+            ("noise_device", ALERT_URL),
+        ],
+        ids=["availability-portal", "availability-device", "noise-device"],
+    )
+    @respx.mock
+    async def test_cleared_read_repeats_the_active_clauses(self, client, call, url):
+        from lm_mcp.tools.scoring import calculate_availability, score_alert_noise
+
+        respx.get(DEVICE_URL_TEMPLATE.format(id=5)).mock(
+            return_value=httpx.Response(200, json={"id": 5, "displayName": "web-02"})
+        )
+        route = respx.get(url).mock(side_effect=alert_lists([]))
+
+        if call == "availability_portal":
+            await calculate_availability(client, hours_back=24, severity_threshold="critical")
+        elif call == "availability_device":
+            await calculate_availability(client, device_id=5, hours_back=24)
+        else:
+            await score_alert_noise(client, device="s1")
+
+        filters = [c.request.url.params["filter"].split(",") for c in route.calls]
+        assert len(filters) == 2
+        active, cleared = filters
+        assert "cleared:true" not in active
+        assert cleared == [*active, "cleared:true"]
+
+    @respx.mock
+    async def test_alert_in_both_lists_counts_once_as_cleared(self, client):
+        from lm_mcp.tools.scoring import calculate_availability
+
+        now = int(time.time())
+        respx.get(DEVICE_URL_TEMPLATE.format(id=5)).mock(
+            return_value=httpx.Response(200, json={"id": 5, "displayName": "web-02"})
+        )
+        # Cleared between the two reads: open in the active read, closed in the cleared one.
+        active = [_device_alert(1, 5, "web-02", now - 7200, 0)]
+        cleared = [_device_alert(1, 5, "web-02", now - 7200, now - 3600)]
+        respx.get(DEVICE_ALERTS_URL_TEMPLATE.format(id=5)).mock(
+            side_effect=alert_lists(active, cleared)
+        )
+
+        result = await calculate_availability(client, device_id=5, hours_back=24)
+
+        data = json.loads(result[0].text)
+        assert data["incident_count"] == 1
+        assert data["total_downtime_minutes"] == 60.0
+
+    @respx.mock
+    async def test_noise_counts_an_alert_in_both_lists_once(self, client):
+        from lm_mcp.tools.scoring import score_alert_noise
+
+        active = [_make_alert(1, "s1", "CPU", start_epoch=BASE_EPOCH)]
+        cleared = [_make_alert(1, "s1", "CPU", start_epoch=BASE_EPOCH, end_epoch=BASE_EPOCH + 600)]
+        respx.get(ALERT_URL).mock(side_effect=alert_lists(active, cleared))
+
+        result = await score_alert_noise(client)
+
+        assert json.loads(result[0].text)["total_alerts"] == 1
+
+    @pytest.mark.parametrize(
+        ("n_active", "active_lb", "n_cleared", "cleared_lb", "total", "truncated", "api_total"),
+        [
+            (3, False, 4, False, 7, False, 7),
+            (10, False, 6000, True, 5010, True, None),
+            (6000, True, 10, False, 5010, True, None),
+        ],
+        ids=["both-exact", "cleared-capped", "active-capped"],
+    )
+    @respx.mock
+    async def test_truncation_covers_both_reads(
+        self, client, n_active, active_lb, n_cleared, cleared_lb, total, truncated, api_total
+    ):
+        from lm_mcp.tools.scoring import score_alert_noise
+
+        active = [_make_alert(i, f"dev-{i % 5}", "DS") for i in range(n_active)]
+        cleared = [
+            _make_alert(
+                100_000 + i, f"dev-{i % 5}", "DS", start_epoch=BASE_EPOCH, end_epoch=BASE_EPOCH + 60
+            )
+            for i in range(n_cleared)
+        ]
+        respx.get(ALERT_URL).mock(
+            side_effect=alert_lists(
+                active, cleared, lower_bound=active_lb, cleared_lower_bound=cleared_lb
+            )
+        )
+
+        result = await score_alert_noise(client)
+
+        data = json.loads(result[0].text)
+        assert data["total_alerts"] == total
+        assert data["truncated"] is truncated
+        assert data["api_total"] == api_total
+
+    @respx.mock
+    async def test_failed_device_lookup_logs_a_warning(self, client, caplog):
+        from lm_mcp.tools.scoring import _resolve_device
+
+        respx.get(DEVICE_URL_TEMPLATE.format(id=42)).mock(
+            return_value=httpx.Response(403, json={"errorMessage": "Forbidden"})
+        )
+
+        with caplog.at_level(logging.WARNING, logger="lm_mcp.tools.scoring"):
+            result = await _resolve_device(client, 42, None)
+
+        assert result["code"] == "DEVICE_LOOKUP_FAILED"
+        records = [r for r in caplog.records if r.name == "lm_mcp.tools.scoring"]
+        assert len(records) == 1
+        assert records[0].levelno == logging.WARNING
+        assert "device 42" in records[0].getMessage()
+        assert records[0].exc_info is not None
