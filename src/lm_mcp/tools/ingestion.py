@@ -116,7 +116,9 @@ async def push_metrics(
                 suggestion="Add a dataSource name string.",
             )
 
-        result = await client.ingest_post("/rest/metric/ingest?create=true", json_body=metrics)
+        result = await client.ingest_post(
+            "/rest/metric/ingest", json_body=metrics, params={"create": "true"}
+        )
         return format_response(result)
     except Exception as e:
         return handle_error(e)

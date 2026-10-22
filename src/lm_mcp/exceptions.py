@@ -87,6 +87,17 @@ class NotFoundError(LMError):
         )
 
 
+class ValidationError(LMError):
+    """Raised when a request is refused before it is sent because an input is malformed."""
+
+    def __init__(self, message: str, suggestion: str | None = None):
+        super().__init__(
+            message=message,
+            code="VALIDATION_ERROR",
+            suggestion=suggestion or "Check the arguments against the tool's input schema.",
+        )
+
+
 class RateLimitError(LMError):
     """Raised when API rate limits are exceeded."""
 

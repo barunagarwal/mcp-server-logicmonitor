@@ -19,6 +19,7 @@ from lm_mcp.exceptions import (
     NotFoundError,
     RateLimitError,
     ServerError,
+    ValidationError,
 )
 from lm_mcp.logging import log_api_request, log_api_response
 
@@ -121,6 +122,35 @@ def _serialize_json_body(json_body: list | dict | None) -> str:
     if json_body is None:
         return ""
     return json.dumps(json_body, separators=(",", ":"), ensure_ascii=False)
+
+
+# Percent-encoded dot, slash, ``?`` and ``#``, in either case.
+_ENCODED_ESCAPE_RE = re.compile(r"%(?:2e|2f|3f|23)", re.IGNORECASE)
+
+
+def _check_path(path: str) -> None:
+    """Refuse a resource path with a segment that could escape the resource it names.
+
+    Tool handlers interpolate caller-supplied ids into paths, so an id such as
+    ``../x`` would reach another resource and ``1?force=true`` would add query
+    parameters. A segment equal to ``.`` or ``..``, or containing ``?``, ``#`` or a
+    percent-encoded dot, slash, ``?`` or ``#``, is refused before any request is
+    built. Query parameters travel in ``params``, never in the path.
+
+    Raises:
+        ValidationError: Naming the first refused segment.
+    """
+    for segment in path.split("/"):
+        if (
+            segment in (".", "..")
+            or "?" in segment
+            or "#" in segment
+            or _ENCODED_ESCAPE_RE.search(segment)
+        ):
+            raise ValidationError(
+                f"Path segment {segment!r} is not allowed in {path!r}",
+                suggestion="Pass resource ids as plain values without '/', '?', '#' or '..'.",
+            )
 
 
 class LogicMonitorClient:
@@ -307,7 +337,9 @@ class LogicMonitorClient:
             NotFoundError: For 404 responses.
             RateLimitError: For 429 responses after retries exhausted.
             ServerError: For 5xx responses.
+            ValidationError: If a path segment could escape its resource.
         """
+        _check_path(path)
         url = f"{self.base_url}{path}"
         # ``json_body`` is checked against None rather than truthiness so that an
         # empty dict ``{}`` still serializes to ``"{}"`` and matches the body
@@ -412,7 +444,9 @@ class LogicMonitorClient:
             RateLimitError: For 429 responses after retries exhausted.
             ServerError: For 5xx responses.
             LMError: For other 4xx responses.
+            ValidationError: If a path segment could escape its resource.
         """
+        _check_path(path)
         url = f"{self.base_url}{path}"
         # Handle string definitions to prevent double-serialization
         json_str = definition if isinstance(definition, str) else json.dumps(definition)
@@ -511,6 +545,7 @@ class LogicMonitorClient:
         self,
         path: str,
         json_body: list | dict | None = None,
+        params: dict | None = None,
     ) -> dict:
         """Make a POST request to ingestion API.
 
@@ -520,15 +555,19 @@ class LogicMonitorClient:
         Args:
             path: Ingestion API path (e.g., /rest/log/ingest).
             json_body: JSON body (list of log entries or metric payload).
+            params: Query parameters (e.g., {"create": "true"}); not part of the
+                signed resource path.
 
         Returns:
             Parsed JSON response.
 
         Raises:
             ConfigurationError: If ingest_url is not configured.
+            ValidationError: If a path segment could escape its resource.
         """
         from lm_mcp.exceptions import ConfigurationError
 
+        _check_path(path)
         if not self.ingest_url:
             raise ConfigurationError(
                 "Ingestion URL not configured. Set ingest_url when creating client."
@@ -554,6 +593,7 @@ class LogicMonitorClient:
                 response = await self._client.request(
                     method="POST",
                     url=url,
+                    params=params,
                     content=content,
                     headers=headers,
                 )

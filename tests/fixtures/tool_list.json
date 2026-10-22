@@ -2332,6 +2332,7 @@
       "properties": {
         "note_id": {
           "description": "Ops note ID to delete",
+          "pattern": "^[A-Za-z0-9_-]+$",
           "type": "string"
         }
       },
@@ -2442,6 +2443,7 @@
       "properties": {
         "sdt_id": {
           "description": "SDT ID to delete",
+          "pattern": "^[A-Za-z0-9_-]+$",
           "type": "string"
         }
       },
@@ -9470,6 +9472,7 @@
         },
         "note_id": {
           "description": "Ops note ID to update",
+          "pattern": "^[A-Za-z0-9_-]+$",
           "type": "string"
         },
         "tags": {
@@ -9642,6 +9645,7 @@
         },
         "sdt_id": {
           "description": "SDT ID to update",
+          "pattern": "^[A-Za-z0-9_-]+$",
           "type": "string"
         },
         "start_date_time": {

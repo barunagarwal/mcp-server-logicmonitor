@@ -30,6 +30,10 @@ _SESSION_WRITE = ToolAnnotations(
     readOnlyHint=False, destructiveHint=False, idempotentHint=True, openWorldHint=False
 )
 
+# Shape of LM ids passed as strings (SDT and ops note ids carry letters and
+# underscores), so a client refuses path characters before the call is made.
+_LM_STRING_ID_PATTERN = "^[A-Za-z0-9_-]+$"
+
 # Tool definitions organized by category
 TOOLS: list[Tool] = []
 
@@ -554,7 +558,11 @@ TOOLS.extend(
             inputSchema={
                 "type": "object",
                 "properties": {
-                    "sdt_id": {"type": "string", "description": "SDT ID to delete"},
+                    "sdt_id": {
+                        "type": "string",
+                        "pattern": _LM_STRING_ID_PATTERN,
+                        "description": "SDT ID to delete",
+                    },
                 },
                 "required": ["sdt_id"],
             },
@@ -569,7 +577,11 @@ TOOLS.extend(
             inputSchema={
                 "type": "object",
                 "properties": {
-                    "sdt_id": {"type": "string", "description": "SDT ID to update"},
+                    "sdt_id": {
+                        "type": "string",
+                        "pattern": _LM_STRING_ID_PATTERN,
+                        "description": "SDT ID to update",
+                    },
                     "end_date_time": {
                         "type": "integer",
                         "description": "New end time in epoch milliseconds",
@@ -3157,7 +3169,11 @@ TOOLS.extend(
             inputSchema={
                 "type": "object",
                 "properties": {
-                    "note_id": {"type": "string", "description": "Ops note ID to update"},
+                    "note_id": {
+                        "type": "string",
+                        "pattern": _LM_STRING_ID_PATTERN,
+                        "description": "Ops note ID to update",
+                    },
                     "note": {"type": "string", "description": "New note text"},
                     "tags": {
                         "type": "array",
@@ -3185,7 +3201,11 @@ TOOLS.extend(
             inputSchema={
                 "type": "object",
                 "properties": {
-                    "note_id": {"type": "string", "description": "Ops note ID to delete"},
+                    "note_id": {
+                        "type": "string",
+                        "pattern": _LM_STRING_ID_PATTERN,
+                        "description": "Ops note ID to delete",
+                    },
                 },
                 "required": ["note_id"],
             },

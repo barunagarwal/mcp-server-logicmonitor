@@ -751,3 +751,186 @@ class TestRequestBodyAuthSignature:
         ) as client:
             with pytest.raises(LMError):
                 await client.ingest_post("/rest/log/ingest", json_body={"foo": "bar"})
+
+
+def _guard_client(auth=None):
+    """Build a client with both API and ingest URLs for the path-segment guard tests."""
+    from lm_mcp.auth.bearer import BearerAuth
+    from lm_mcp.client import LogicMonitorClient
+
+    return LogicMonitorClient(
+        base_url="https://test.logicmonitor.com/santaba/rest",
+        auth=auth or BearerAuth("test_token"),
+        ingest_url="https://test.logicmonitor.com",
+    )
+
+
+class TestPathSegmentGuard:
+    """R3.1: a path segment that can escape its resource is refused before any request."""
+
+    @pytest.mark.asyncio
+    @respx.mock
+    async def test_dot_dot_segment_is_refused_and_nothing_is_sent(self):
+        """A traversal segment raises ValidationError naming the segment; no request goes out."""
+        from lm_mcp.exceptions import ValidationError
+
+        route = respx.route().mock(return_value=Response(200, json={}))
+        async with _guard_client() as client:
+            with pytest.raises(ValidationError, match=r"'\.\.'"):
+                await client.get("/device/devices/../../setting/admins")
+
+        assert not route.called
+
+    @pytest.mark.asyncio
+    @respx.mock
+    async def test_delete_with_query_in_id_is_refused(self):
+        """A DELETE whose id argument smuggles a query string is refused."""
+        from lm_mcp.exceptions import ValidationError
+
+        route = respx.route().mock(return_value=Response(200, json={}))
+        async with _guard_client() as client:
+            with pytest.raises(ValidationError, match=r"'1\?force=true'"):
+                await client.delete("/sdt/sdts/1?force=true")
+
+        assert not route.called
+
+    @pytest.mark.asyncio
+    @respx.mock
+    @pytest.mark.parametrize("method", ["put", "patch"])
+    async def test_put_and_patch_traversal_is_refused(self, method):
+        """PUT and PATCH refuse a traversal segment before sending their body."""
+        from lm_mcp.exceptions import ValidationError
+
+        route = respx.route().mock(return_value=Response(200, json={}))
+        async with _guard_client() as client:
+            with pytest.raises(ValidationError, match=r"'\.\.'"):
+                await getattr(client, method)(
+                    "/device/devices/1/../../setting/admins/1", json_body={"roles": []}
+                )
+
+        assert not route.called
+
+    @pytest.mark.asyncio
+    @respx.mock
+    @pytest.mark.parametrize(
+        "segment",
+        ["%2e%2e", "%2E%2E", ".%2e", "a%2fb", "a%2Fb", "x%3fy", "x%3Fy", "x%23y", "x#y", "."],
+    )
+    async def test_encoded_or_reserved_segment_is_refused(self, segment):
+        """Percent-encoded dot, slash, ? and #, a raw # and a lone dot are refused."""
+        from lm_mcp.exceptions import ValidationError
+
+        route = respx.route().mock(return_value=Response(200, json={}))
+        async with _guard_client() as client:
+            with pytest.raises(ValidationError):
+                await client.get(f"/device/devices/{segment}/properties")
+
+        assert not route.called
+
+    @pytest.mark.asyncio
+    @respx.mock
+    async def test_ingest_post_traversal_is_refused(self):
+        """ingest_post applies the same guard to its ingest path."""
+        from lm_mcp.exceptions import ValidationError
+
+        route = respx.route().mock(return_value=Response(202, json={"success": True}))
+        async with _guard_client() as client:
+            with pytest.raises(ValidationError):
+                await client.ingest_post("/rest/../santaba/rest/setting/admins", json_body={})
+
+        assert not route.called
+
+    @pytest.mark.asyncio
+    @respx.mock
+    async def test_post_multipart_traversal_is_refused(self):
+        """post_multipart applies the same guard to its import path."""
+        from lm_mcp.exceptions import ValidationError
+
+        route = respx.route().mock(return_value=Response(200, json={}))
+        async with _guard_client() as client:
+            with pytest.raises(ValidationError):
+                await client.post_multipart("/setting/../setting/admins", {"name": "x"})
+
+        assert not route.called
+
+    @pytest.mark.asyncio
+    @respx.mock
+    async def test_delete_sdt_tool_returns_error_content_and_sends_nothing(
+        self, monkeypatch, caplog
+    ):
+        """delete_sdt with a traversal id returns ErrorContent and makes no request.
+
+        The refusal is an LMError, so handle_error reports it without logging it as an
+        unhandled exception with a traceback.
+        """
+        from lm_mcp.tools import ErrorContent
+        from lm_mcp.tools.sdts import delete_sdt
+
+        monkeypatch.setenv("LM_PORTAL", "test.logicmonitor.com")
+        monkeypatch.setenv("LM_BEARER_TOKEN", "test-token")
+        monkeypatch.setenv("LM_ENABLE_WRITE_OPERATIONS", "true")
+        route = respx.route().mock(return_value=Response(200, json={}))
+        async with _guard_client() as client:
+            result = await delete_sdt(client, sdt_id="../x")
+
+        assert not route.called
+        assert len(result) == 1
+        assert isinstance(result[0], ErrorContent)
+        assert result[0].text.startswith("Error: ")
+        assert "'..'" in result[0].text
+        assert "unhandled error in tool handler" not in caplog.text
+
+    @pytest.mark.asyncio
+    @respx.mock
+    async def test_ordinary_paths_still_reach_the_portal(self):
+        """Ids with letters, digits, underscores, hyphens and inner dots pass the guard."""
+        route = respx.route().mock(return_value=Response(200, json={"ok": True}))
+        async with _guard_client() as client:
+            await client.delete("/sdt/sdts/R_123")
+            await client.get("/setting/opsnotes/note-1")
+            await client.get("/device/devices/42/devicedatasources/7/instances/v1.2")
+
+        assert route.call_count == 3
+
+    @pytest.mark.asyncio
+    @respx.mock
+    async def test_ingest_post_sends_params_as_query_and_signs_bare_path(self):
+        """Query parameters ride in params, so the guarded path carries no ? of its own."""
+        route = respx.post("https://test.logicmonitor.com/rest/metric/ingest").mock(
+            return_value=Response(202, json={"success": True})
+        )
+        auth = _RecordingAuth()
+        async with _guard_client(auth) as client:
+            await client.ingest_post(
+                "/rest/metric/ingest", json_body={"a": 1}, params={"create": "true"}
+            )
+
+        assert route.called
+        assert route.calls[0].request.url.params["create"] == "true"
+        assert auth.calls == [("POST", "/rest/metric/ingest", '{"a":1}')]
+
+
+class TestStringIdSchemaPattern:
+    """R3.1: the string-typed id properties declare the id shape, so a client refuses ../x."""
+
+    @pytest.mark.parametrize(
+        ("tool_name", "prop"),
+        [
+            ("delete_sdt", "sdt_id"),
+            ("update_sdt", "sdt_id"),
+            ("update_ops_note", "note_id"),
+            ("delete_ops_note", "note_id"),
+        ],
+    )
+    def test_id_pattern_refuses_traversal_and_admits_lm_ids(self, tool_name, prop):
+        """The schema rejects ../x and 1?x=y and accepts SDT_123 and note-1."""
+        import jsonschema
+
+        from lm_mcp.registry import TOOLS
+
+        schema = next(t for t in TOOLS if t.name == tool_name).inputSchema
+        for bad in ("../x", "1?x=y", "a/b", ""):
+            with pytest.raises(jsonschema.ValidationError):
+                jsonschema.validate({prop: bad}, schema)
+        for good in ("SDT_123", "note-1", "42"):
+            jsonschema.validate({prop: good}, schema)

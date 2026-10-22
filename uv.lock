@@ -1185,6 +1185,7 @@ version = "4.2.1"
 source = { editable = "." }
 dependencies = [
     { name = "httpx" },
+    { name = "jsonschema" },
     { name = "mcp" },
     { name = "pydantic" },
     { name = "pydantic-settings" },
@@ -1228,6 +1229,7 @@ requires-dist = [
     { name = "granite-tsfm", marker = "extra == 'huggingface'", specifier = ">=0.2.19" },
     { name = "httpx", specifier = ">=0.27.0" },
     { name = "ibm-watsonx-ai", marker = "extra == 'ibm'", specifier = ">=1.1.0" },
+    { name = "jsonschema", specifier = ">=4.26.0" },
     { name = "mcp", specifier = ">=1.19.0,<2" },
     { name = "pandas", marker = "extra == 'ibm'", specifier = ">=2.0.0" },
     { name = "pydantic", specifier = ">=2.0.0" },

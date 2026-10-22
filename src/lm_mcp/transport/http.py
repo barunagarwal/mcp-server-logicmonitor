@@ -151,13 +151,24 @@ def create_asgi_app() -> Starlette:
             return Response(content="not ready", status_code=503)
         return Response(content="ready", status_code=200)
 
+    def rpc_error(code: int, message: str, req_id: object, status_code: int = 400) -> Response:
+        """Build a JSON-RPC 2.0 error response."""
+        return JSONResponse(
+            {"jsonrpc": "2.0", "error": {"code": code, "message": message}, "id": req_id},
+            status_code=status_code,
+        )
+
     async def mcp_endpoint(request: Request) -> Response:
         """MCP JSON-RPC endpoint for tool calls.
 
         Delegates tool execution to the shared execute_tool middleware,
         ensuring consistent behavior (filtering, validation, audit logging,
-        session recording) across stdio and HTTP transports.
+        session recording) across stdio and HTTP transports. tools/call
+        arguments are checked against the tool's input schema first, so a
+        malformed call never reaches a handler.
         """
+        import jsonschema
+
         from lm_mcp.registry import AWX_TOOLS, TF_TOOLS, TOOLS, WATSONX_TOOLS
         from lm_mcp.server import (
             _awx_client,
@@ -170,24 +181,29 @@ def create_asgi_app() -> Starlette:
         try:
             body = await request.json()
         except json.JSONDecodeError:
-            return JSONResponse(
-                {"jsonrpc": "2.0", "error": {"code": -32700, "message": "Parse error"}, "id": None},
-                status_code=400,
-            )
+            return rpc_error(-32700, "Parse error", None)
 
-        method = body.get("method")
-        params = body.get("params", {})
-        req_id = body.get("id")
-
+        req_id = None
         try:
+            if not isinstance(body, dict):
+                return rpc_error(-32600, "Invalid Request", None)
+
+            method = body.get("method")
+            params = body.get("params", {})
+            req_id = body.get("id")
+            if not isinstance(params, dict):
+                return rpc_error(-32602, "Invalid params: params must be an object", req_id)
+
+            # The tools this server can dispatch, before operator filters.
+            all_tools = list(TOOLS)
+            if _awx_client is not None:
+                all_tools.extend(AWX_TOOLS)
+            if _watsonx_client is not None:
+                all_tools.extend(WATSONX_TOOLS)
+            if _tf_runner is not None:
+                all_tools.extend(TF_TOOLS)
+
             if method == "tools/list":
-                all_tools = list(TOOLS)
-                if _awx_client is not None:
-                    all_tools.extend(AWX_TOOLS)
-                if _watsonx_client is not None:
-                    all_tools.extend(WATSONX_TOOLS)
-                if _tf_runner is not None:
-                    all_tools.extend(TF_TOOLS)
                 filtered = _filter_tools(all_tools, config)
                 result = [{"name": t.name, "description": t.description} for t in filtered]
                 return JSONResponse({"jsonrpc": "2.0", "result": result, "id": req_id})
@@ -197,14 +213,20 @@ def create_asgi_app() -> Starlette:
                 arguments = params.get("arguments", {})
 
                 if not tool_name:
-                    return JSONResponse(
-                        {
-                            "jsonrpc": "2.0",
-                            "error": {"code": -32602, "message": "Missing tool name"},
-                            "id": req_id,
-                        },
-                        status_code=400,
-                    )
+                    return rpc_error(-32602, "Missing tool name", req_id)
+
+                # A name outside the manifest goes to execute_tool, which owns the
+                # unknown-tool and integration-not-configured refusals.
+                tool = next((t for t in all_tools if t.name == tool_name), None)
+                if tool is not None:
+                    try:
+                        jsonschema.validate(arguments, tool.inputSchema)
+                    except jsonschema.ValidationError as e:
+                        message = f"Invalid arguments for {tool_name}: {e.message}"
+                        location = "/".join(str(part) for part in e.absolute_path)
+                        if location:
+                            message += f" (at {location})"
+                        return rpc_error(-32602, message, req_id)
 
                 result = await execute_tool(tool_name, arguments)
 
@@ -233,26 +255,16 @@ def create_asgi_app() -> Starlette:
                 return JSONResponse({"jsonrpc": "2.0", "result": result, "id": req_id})
 
             else:
-                return JSONResponse(
-                    {
-                        "jsonrpc": "2.0",
-                        "error": {"code": -32601, "message": f"Method not found: {method}"},
-                        "id": req_id,
-                    },
-                    status_code=400,
-                )
+                return rpc_error(-32601, f"Method not found: {method}", req_id)
 
-        except ValueError as e:
-            return JSONResponse(
-                {"jsonrpc": "2.0", "error": {"code": -32602, "message": str(e)}, "id": req_id},
-                status_code=400,
-            )
-        except Exception as e:
+        # Exception text can carry internal state (URLs, credentials in a DSN), so
+        # the caller gets a fixed message and the traceback goes to the log.
+        except ValueError:
+            logger.exception("Invalid params in MCP request")
+            return rpc_error(-32602, "Invalid params", req_id)
+        except Exception:
             logger.exception("Error handling MCP request")
-            return JSONResponse(
-                {"jsonrpc": "2.0", "error": {"code": -32603, "message": str(e)}, "id": req_id},
-                status_code=500,
-            )
+            return rpc_error(-32603, "Internal error", req_id, status_code=500)
 
     # Analysis store (shared across requests within the ASGI app)
     from lm_mcp.analysis import AnalysisStore, run_analysis, validate_workflow
