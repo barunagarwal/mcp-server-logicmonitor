@@ -186,7 +186,7 @@ async def create_datasource(
             # Look up existing by name and delete if found
             existing = await client.get(
                 "/setting/datasources",
-                params={"filter": f'name:"{payload["name"]}"', "size": 1},
+                params={"filter": f"name:{quote_filter_value(payload['name'])}", "size": 1},
             )
             items = existing.get("items", [])
             if items:

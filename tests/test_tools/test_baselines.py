@@ -2,6 +2,7 @@
 # Description: Validates save_baseline and compare_to_baseline tool handlers.
 
 import json
+import logging
 
 import httpx
 import pytest
@@ -10,6 +11,7 @@ import respx
 from lm_mcp.auth.bearer import BearerAuth
 from lm_mcp.client import LogicMonitorClient
 from lm_mcp.session import get_session, reset_session, set_session
+from lm_mcp.tools import is_error_result
 
 
 @pytest.fixture
@@ -595,3 +597,65 @@ class TestBaselineErrorEnvelopeShape:
         text = result[0].text
         if text.startswith("Error:"):
             assert "Suggestion:" in text or "code" in text.lower()
+
+
+class TestErrorMessageWithoutErrorCode:
+    """A 200 body carrying errorMessage but no errorCode is an API error, not a crash (R3.8)."""
+
+    DATA_URL = (
+        "https://test.logicmonitor.com/santaba/rest"
+        "/device/devices/1/devicedatasources/10/instances/100/data"
+    )
+
+    @respx.mock
+    async def test_save_baseline_returns_the_server_message(self, client, caplog):
+        """save_baseline returns ErrorContent with the message and logs no unhandled error."""
+        from lm_mcp.tools.baselines import save_baseline
+
+        respx.get(self.DATA_URL).mock(
+            return_value=httpx.Response(
+                200, json={"errorMessage": "No data for instance 100", "errorDetail": None}
+            )
+        )
+
+        with caplog.at_level(logging.WARNING, logger="lm_mcp.tools"):
+            result = await save_baseline(
+                client,
+                device_id=1,
+                device_datasource_id=10,
+                instance_id=100,
+                baseline_name="nodata",
+            )
+
+        assert is_error_result(result)
+        assert "No data for instance 100" in result[0].text
+        assert "unhandled error" not in caplog.text
+        assert "errorMessage" not in result[0].text
+
+    @respx.mock
+    async def test_compare_to_baseline_returns_the_server_message(self, client, caplog):
+        """compare_to_baseline returns ErrorContent with the message and logs no unhandled error."""
+        from lm_mcp.tools.baselines import compare_to_baseline
+
+        get_session().set_variable(
+            "baseline_nodata",
+            {
+                "device_id": 1,
+                "device_datasource_id": 10,
+                "instance_id": 100,
+                "datapoints": {"cpu": {"mean": 50.0, "min": 40.0, "max": 60.0, "stddev": 5.0}},
+            },
+        )
+        respx.get(self.DATA_URL).mock(
+            return_value=httpx.Response(
+                200, json={"errorMessage": "No data for instance 100", "errorDetail": None}
+            )
+        )
+
+        with caplog.at_level(logging.WARNING, logger="lm_mcp.tools"):
+            result = await compare_to_baseline(client, baseline_name="nodata")
+
+        assert is_error_result(result)
+        assert "No data for instance 100" in result[0].text
+        assert "unhandled error" not in caplog.text
+        assert "errorMessage" not in result[0].text

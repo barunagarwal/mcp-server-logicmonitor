@@ -1,0 +1,49 @@
+# Description: Filter value interpolations in src/lm_mcp/tools that bypass quote_filter_value on purpose.
+# Description: One "module.py: expression" per line; each is an integer, boolean or constant-map value, or a value already built from quote_filter_value output.
+#
+# tests/test_filter_invariant.py fails on any interpolation not listed here and on any
+# entry that no longer matches a hit. A raw string value never belongs here: route it
+# through quote_filter_value instead (cost.py: or_values is a |-join of values that
+# already went through it). Print the current hits with
+# `uv run python tests/test_filter_invariant.py`.
+alert_rules.py: priority_filter
+alerts.py: device_id
+alerts.py: end_epoch
+alerts.py: SEVERITY_MAP[severity.lower()]
+alerts.py: start_epoch
+alerts.py: str(acked).lower()
+alerts.py: str(cleared).lower()
+alerts.py: str(sdted).lower()
+api_tokens.py: token_id
+audit.py: end_time
+audit.py: start_time
+audit.py: token_id
+collectors.py: cid
+collectors.py: collector_group_id
+collectors.py: start_epoch
+correlation.py: SEVERITY_MAP[severity.lower()]
+correlation.py: start_epoch
+cost.py: or_values
+dashboards.py: group_id
+devices.py: DEVICE_STATUS_MAP[status.lower()]
+devices.py: group_id
+devices.py: parent_id
+event_correlation.py: start_epoch
+networking.py: end_epoch
+networking.py: exporter_device_id
+networking.py: SEVERITY_MAP[severity.lower()]
+networking.py: start_epoch
+reports.py: group_id
+scoring.py: device_id
+scoring.py: min_severity
+scoring.py: start_epoch
+sdts.py: device_group_id
+sdts.py: device_id
+sdts.py: future
+sdts.py: now
+topology_analysis.py: dev['device_id']
+topology.py: device_group_id
+topology.py: device_id
+traces.py: SEVERITY_MAP[severity.lower()]
+websites.py: group_id
+websites.py: parent_id

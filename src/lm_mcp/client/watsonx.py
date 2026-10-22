@@ -6,7 +6,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
-from typing import Any
+from typing import Any, NoReturn
 
 from lm_mcp.exceptions import (
     AuthenticationError,
@@ -215,7 +215,7 @@ def _build_summary_prompt(data_str: str, context: str) -> str:
     )
 
 
-def _raise_watsonx_error(exc: Exception, operation: str) -> None:
+def _raise_watsonx_error(exc: Exception, operation: str) -> NoReturn:
     """Map watsonx SDK exceptions to LMError types."""
     exc_str = str(exc)
     exc_type = type(exc).__name__

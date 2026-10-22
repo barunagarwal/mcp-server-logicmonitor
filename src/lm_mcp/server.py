@@ -12,7 +12,7 @@ from mcp.types import CallToolResult, CompleteResult, GetPromptResult, TextConte
 from lm_mcp.client import LogicMonitorClient
 from lm_mcp.completions import get_completions
 from lm_mcp.config import get_config
-from lm_mcp.logging import is_write_tool, log_write_operation
+from lm_mcp.logging import configure_logging, is_write_tool, log_write_operation
 from lm_mcp.prompts import PROMPTS, get_prompt_messages
 from lm_mcp.registry import AWX_TOOLS, TF_TOOLS, TOOLS, WATSONX_TOOLS, get_tool_handler
 from lm_mcp.resources import RESOURCES, get_resource_content
@@ -466,10 +466,12 @@ async def execute_tool(name: str, arguments: dict) -> list[TextContent]:
 
         return result
     except ValueError as e:
+        logger.exception("Tool %s rejected its arguments", name)
         if is_write_tool(name):
             log_write_operation(name, arguments, success=False)
         return [ErrorContent(type="text", text=f"Error: {e}")]
     except Exception as e:
+        logger.exception("Tool %s raised", name)
         if is_write_tool(name):
             log_write_operation(name, arguments, success=False)
         return [ErrorContent(type="text", text=f"Error executing {name}: {e}")]
@@ -574,6 +576,7 @@ async def run_server() -> None:
     from lm_mcp.transport import get_transport_runner
 
     config = get_config()
+    configure_logging(config)
     runner = get_transport_runner(config)
     await runner()
 

@@ -7,7 +7,7 @@ import functools
 import json
 import logging
 from collections.abc import Callable
-from typing import Any, ClassVar, TypeVar
+from typing import Any, ClassVar, TypeVar, overload
 
 from mcp.types import TextContent
 
@@ -138,13 +138,30 @@ def quote_filter_value(value: str) -> str:
     in double quotes. Numeric and boolean values work without quotes, but
     string values silently return zero results when unquoted.
 
+    Backslashes and double quotes inside the value are escaped, backslash
+    first, so the value cannot close its quotes and append filter clauses
+    (an unescaped ``a"|"b`` would send two clauses joined by OR).
+
     Args:
         value: The string value to quote.
 
     Returns:
-        The value wrapped in double quotes.
+        The escaped value wrapped in double quotes.
     """
-    return f'"{value}"'
+    escaped = value.replace("\\", "\\\\").replace('"', '\\"')
+    return f'"{escaped}"'
+
+
+@overload
+def sanitize_filter_value(value: str) -> tuple[str, bool]: ...
+
+
+@overload
+def sanitize_filter_value(value: None) -> tuple[None, bool]: ...
+
+
+@overload
+def sanitize_filter_value(value: str | None) -> tuple[str | None, bool]: ...
 
 
 def sanitize_filter_value(value: str | None) -> tuple[str | None, bool]:
@@ -152,6 +169,10 @@ def sanitize_filter_value(value: str | None) -> tuple[str | None, bool]:
 
     The LogicMonitor ~ operator already performs substring matching,
     so wildcards are unnecessary and cause issues when URL-encoded.
+
+    The overloads keep a str input typed as a str output, so a call site that
+    has already narrowed its argument can pass the cleaned value straight to
+    quote_filter_value.
 
     Args:
         value: The filter value to sanitize. May be None.
@@ -291,6 +312,14 @@ def handle_error(error: Exception) -> list[TextContent]:
         List containing a single ErrorContent with the error details.
     """
     if isinstance(error, LMError):
+        # An API refusal is a WARNING with the server's own words attached, so a
+        # 4xx or 5xx leaves a trace on stderr and not only in the tool result.
+        logger.warning(
+            "%s: %s%s",
+            error.code,
+            error.message,
+            f" (details: {error.details})" if error.details else "",
+        )
         return format_response(error.to_dict())
 
     # Log unexpected exceptions with stack trace before returning sanitized response.

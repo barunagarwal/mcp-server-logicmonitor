@@ -9,7 +9,7 @@ import respx
 
 from lm_mcp.auth.bearer import BearerAuth
 from lm_mcp.client import LogicMonitorClient
-from lm_mcp.tools import sanitize_filter_value
+from lm_mcp.tools import quote_filter_value, sanitize_filter_value
 
 
 @pytest.fixture
@@ -27,6 +27,20 @@ def client(auth):
         timeout=30,
         api_version=3,
     )
+
+
+@pytest.fixture
+def enable_writes(monkeypatch):
+    """Enable write operations for testing."""
+    monkeypatch.setenv("LM_PORTAL", "test.logicmonitor.com")
+    monkeypatch.setenv("LM_BEARER_TOKEN", "test-token")
+    monkeypatch.setenv("LM_ENABLE_WRITE_OPERATIONS", "true")
+
+    from importlib import reload
+
+    import lm_mcp.config
+
+    reload(lm_mcp.config)
 
 
 class TestSanitizeFilterValue:
@@ -278,3 +292,61 @@ class TestFilterValueSentToApi:
 
         params = dict(route.calls[0].request.url.params)
         assert params["filter"] == 'name~"portal"'
+
+
+class TestQuoteFilterValue:
+    """quote_filter_value yields exactly one quoted clause whatever the value holds (R3.6)."""
+
+    def test_plain_value_is_wrapped(self):
+        """A value without special characters is wrapped in double quotes."""
+        assert quote_filter_value("prod") == '"prod"'
+
+    def test_embedded_quotes_are_escaped(self):
+        """Quotes inside the value are escaped so they cannot close the clause."""
+        assert quote_filter_value('a"|"b') == '"a\\"|\\"b"'
+
+    def test_backslash_is_escaped(self):
+        """A backslash is doubled so it cannot neutralize the escape of a quote."""
+        assert quote_filter_value("a\\b") == '"a\\\\b"'
+
+    def test_backslash_before_quote_keeps_the_quote_escaped(self):
+        """Backslashes are escaped before quotes; the other order leaves the quote live."""
+        expected = '"' + "a" + "\\\\" + '\\"' + "b" + '"'
+        assert quote_filter_value('a\\"b') == expected
+
+
+class TestFilterValueWithQuotesSendsOneClause:
+    """A value shaped like an injected OR clause reaches the API as one clause (R3.6)."""
+
+    @respx.mock
+    async def test_devices_name_filter_with_quotes_sends_one_clause(self, client):
+        """get_devices sends exactly one displayName clause for a value holding quotes."""
+        from lm_mcp.tools.devices import get_devices
+
+        route = respx.get("https://test.logicmonitor.com/santaba/rest/device/devices").mock(
+            return_value=httpx.Response(200, json={"items": [], "total": 0})
+        )
+
+        await get_devices(client, name_filter='a"|"b')
+
+        params = dict(route.calls[0].request.url.params)
+        assert params["filter"] == 'displayName~"a\\"|\\"b"'
+        assert params["filter"].count("displayName") == 1
+
+    @respx.mock
+    async def test_create_datasource_overwrite_lookup_quotes_the_name(self, client, enable_writes):
+        """The overwrite lookup by name goes through quote_filter_value."""
+        from lm_mcp.tools.datasources import create_datasource
+
+        lookup = respx.get("https://test.logicmonitor.com/santaba/rest/setting/datasources").mock(
+            return_value=httpx.Response(200, json={"items": [], "total": 0})
+        )
+        respx.post("https://test.logicmonitor.com/santaba/rest/setting/datasources").mock(
+            return_value=httpx.Response(200, json={"id": 7, "name": 'a"|"b'})
+        )
+
+        definition = {"name": 'a"|"b', "collectMethod": "script"}
+        await create_datasource(client, definition, overwrite=True)
+
+        params = dict(lookup.calls[0].request.url.params)
+        assert params["filter"] == 'name:"a\\"|\\"b"'

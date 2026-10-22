@@ -6,6 +6,7 @@ from __future__ import annotations
 import json
 
 from mcp.types import Resource
+from pydantic import AnyUrl
 
 from lm_mcp.resources.enums import get_enum_content
 from lm_mcp.resources.filters import get_filter_content
@@ -16,154 +17,154 @@ from lm_mcp.resources.schemas import get_schema_content
 RESOURCES: list[Resource] = [
     # Schema resources - API object field definitions
     Resource(
-        uri="lm://schema/alerts",
+        uri=AnyUrl("lm://schema/alerts"),
         name="Alert Schema",
         description="LogicMonitor alert object fields, types, and descriptions",
         mimeType="application/json",
     ),
     Resource(
-        uri="lm://schema/devices",
+        uri=AnyUrl("lm://schema/devices"),
         name="Device Schema",
         description="LogicMonitor device object fields, types, and descriptions",
         mimeType="application/json",
     ),
     Resource(
-        uri="lm://schema/sdts",
+        uri=AnyUrl("lm://schema/sdts"),
         name="SDT Schema",
         description="LogicMonitor SDT (Scheduled Downtime) object fields",
         mimeType="application/json",
     ),
     Resource(
-        uri="lm://schema/dashboards",
+        uri=AnyUrl("lm://schema/dashboards"),
         name="Dashboard Schema",
         description="LogicMonitor dashboard object fields",
         mimeType="application/json",
     ),
     Resource(
-        uri="lm://schema/collectors",
+        uri=AnyUrl("lm://schema/collectors"),
         name="Collector Schema",
         description="LogicMonitor collector object fields",
         mimeType="application/json",
     ),
     Resource(
-        uri="lm://schema/escalations",
+        uri=AnyUrl("lm://schema/escalations"),
         name="Escalation Chain Schema",
         description="LogicMonitor escalation chain object fields",
         mimeType="application/json",
     ),
     Resource(
-        uri="lm://schema/reports",
+        uri=AnyUrl("lm://schema/reports"),
         name="Report Schema",
         description="LogicMonitor report object fields",
         mimeType="application/json",
     ),
     Resource(
-        uri="lm://schema/websites",
+        uri=AnyUrl("lm://schema/websites"),
         name="Website Schema",
         description="LogicMonitor website check object fields",
         mimeType="application/json",
     ),
     Resource(
-        uri="lm://schema/datasources",
+        uri=AnyUrl("lm://schema/datasources"),
         name="DataSource Schema",
         description="LogicMonitor DataSource definition fields",
         mimeType="application/json",
     ),
     Resource(
-        uri="lm://schema/users",
+        uri=AnyUrl("lm://schema/users"),
         name="User Schema",
         description="LogicMonitor user object fields",
         mimeType="application/json",
     ),
     Resource(
-        uri="lm://schema/audit",
+        uri=AnyUrl("lm://schema/audit"),
         name="Audit Log Schema",
         description="LogicMonitor audit log entry fields",
         mimeType="application/json",
     ),
     # Enum resources - valid values for specific fields
     Resource(
-        uri="lm://enums/severity",
+        uri=AnyUrl("lm://enums/severity"),
         name="Alert Severity Values",
         description="Valid severity levels: critical(4), error(3), warning(2), info(1)",
         mimeType="application/json",
     ),
     Resource(
-        uri="lm://enums/device-status",
+        uri=AnyUrl("lm://enums/device-status"),
         name="Device Status Values",
         description="Valid device status values: normal(0), dead(1), etc.",
         mimeType="application/json",
     ),
     Resource(
-        uri="lm://enums/sdt-type",
+        uri=AnyUrl("lm://enums/sdt-type"),
         name="SDT Type Values",
         description="Valid SDT types: DeviceSDT, DeviceGroupSDT, etc.",
         mimeType="application/json",
     ),
     Resource(
-        uri="lm://enums/alert-cleared",
+        uri=AnyUrl("lm://enums/alert-cleared"),
         name="Alert Cleared Status",
         description="Alert cleared status values: true, false",
         mimeType="application/json",
     ),
     Resource(
-        uri="lm://enums/alert-acked",
+        uri=AnyUrl("lm://enums/alert-acked"),
         name="Alert Acknowledged Status",
         description="Alert acknowledgment status values: true, false",
         mimeType="application/json",
     ),
     Resource(
-        uri="lm://enums/collector-build",
+        uri=AnyUrl("lm://enums/collector-build"),
         name="Collector Build Types",
         description="Collector build version types: EA, GD, MGD",
         mimeType="application/json",
     ),
     # Filter resources - how to filter API queries
     Resource(
-        uri="lm://filters/alerts",
+        uri=AnyUrl("lm://filters/alerts"),
         name="Alert Filter Fields",
         description="Filter fields and operators for alert queries",
         mimeType="application/json",
     ),
     Resource(
-        uri="lm://filters/devices",
+        uri=AnyUrl("lm://filters/devices"),
         name="Device Filter Fields",
         description="Filter fields and operators for device queries",
         mimeType="application/json",
     ),
     Resource(
-        uri="lm://filters/sdts",
+        uri=AnyUrl("lm://filters/sdts"),
         name="SDT Filter Fields",
         description="Filter fields and operators for SDT queries",
         mimeType="application/json",
     ),
     Resource(
-        uri="lm://syntax/operators",
+        uri=AnyUrl("lm://syntax/operators"),
         name="Filter Operators",
         description="LogicMonitor API filter operators: :, ~, >, <, !:, !~, >:, <:",
         mimeType="application/json",
     ),
     # Guide resources - help AI agents pick tools and construct queries
     Resource(
-        uri="lm://guide/tool-categories",
+        uri=AnyUrl("lm://guide/tool-categories"),
         name="Tool Categories",
         description="All LogicMonitor MCP tools organized by domain category",
         mimeType="application/json",
     ),
     Resource(
-        uri="lm://guide/examples",
+        uri=AnyUrl("lm://guide/examples"),
         name="Common Query Examples",
         description="Common filter patterns and query examples for LogicMonitor API",
         mimeType="application/json",
     ),
     Resource(
-        uri="lm://guide/mcp-orchestration",
+        uri=AnyUrl("lm://guide/mcp-orchestration"),
         name="MCP Server Orchestration Guide",
         description="Patterns for combining LogicMonitor with other MCP servers",
         mimeType="application/json",
     ),
     Resource(
-        uri="lm://guide/best-practices",
+        uri=AnyUrl("lm://guide/best-practices"),
         name="Best Practices Guide",
         description=(
             "Scenario-based best practices for alert noise, device health, "
@@ -172,7 +173,7 @@ RESOURCES: list[Resource] = [
         mimeType="application/json",
     ),
     Resource(
-        uri="lm://guide/example-responses",
+        uri=AnyUrl("lm://guide/example-responses"),
         name="Example Tool Responses",
         description=("Realistic example output from key tools to help understand response formats"),
         mimeType="application/json",

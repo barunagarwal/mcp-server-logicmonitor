@@ -9,6 +9,7 @@ import time
 from mcp.types import TextContent
 
 from lm_mcp.client import LogicMonitorClient
+from lm_mcp.exceptions import LMError
 from lm_mcp.session import get_session
 from lm_mcp.tools import format_response, handle_error
 
@@ -56,7 +57,9 @@ async def save_baseline(
         resp = await client.get(path, params=params)
 
         if isinstance(resp, dict) and "errorMessage" in resp:
-            return handle_error(resp)
+            # A 200 whose body carries errorMessage without errorCode slips past the
+            # client's check; surface it as an API error, not an unhandled crash.
+            raise LMError(message=str(resp["errorMessage"]), code="API_ERROR")
 
         dp_names = resp.get("datapoints", resp.get("dataPoints", []))
         value_rows = resp.get("values", [])
@@ -176,7 +179,9 @@ async def compare_to_baseline(
         )
 
         if isinstance(resp, dict) and "errorMessage" in resp:
-            return handle_error(resp)
+            # A 200 whose body carries errorMessage without errorCode slips past the
+            # client's check; surface it as an API error, not an unhandled crash.
+            raise LMError(message=str(resp["errorMessage"]), code="API_ERROR")
 
         dp_names = resp.get("datapoints", resp.get("dataPoints", []))
         value_rows = resp.get("values", [])

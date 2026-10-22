@@ -180,6 +180,39 @@ class TestExecuteToolMiddleware:
 
         assert "bad input" in result[0].text
 
+    @pytest.mark.parametrize(
+        ("exc", "arguments"),
+        [
+            (TypeError("get_devices() got an unexpected keyword argument 'foo'"), {"foo": 1}),
+            (ValueError("bad input"), {"limit": -1}),
+        ],
+    )
+    async def test_handler_exception_is_logged_with_traceback(
+        self, monkeypatch, mock_client, caplog, exc, arguments
+    ):
+        """A handler that raises leaves one record with exc_info and an ErrorContent result."""
+        monkeypatch.setenv("LM_PORTAL", "test.logicmonitor.com")
+        monkeypatch.setenv("LM_BEARER_TOKEN", "test-token")
+
+        failing_handler = AsyncMock(side_effect=exc)
+
+        with (
+            patch("lm_mcp.server.get_tool_handler", return_value=failing_handler),
+            patch("lm_mcp.server.get_client", return_value=mock_client),
+            caplog.at_level(logging.ERROR, logger="lm_mcp.server"),
+        ):
+            from lm_mcp.server import execute_tool
+
+            result = await execute_tool("get_devices", arguments)
+
+        assert is_error_result(result)
+        assert str(exc) in result[0].text
+        records = [r for r in caplog.records if r.name == "lm_mcp.server"]
+        assert len(records) == 1
+        assert records[0].exc_info is not None
+        assert records[0].exc_info[0] is type(exc)
+        assert "get_devices" in records[0].getMessage()
+
 
 class TestCallToolDelegatesToExecuteTool:
     """Tests that the MCP call_tool handler delegates to execute_tool."""

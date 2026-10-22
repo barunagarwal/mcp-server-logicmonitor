@@ -1,12 +1,16 @@
 # Description: Error handling tests for undertested tool modules.
 # Description: Validates error responses for cost, topology, batchjob, and audit tools.
 
+import logging
+
 import httpx
 import pytest
 import respx
 
 from lm_mcp.auth.bearer import BearerAuth
 from lm_mcp.client import LogicMonitorClient
+from lm_mcp.exceptions import LMPermissionError
+from lm_mcp.tools import handle_error, is_error_result
 
 
 @pytest.fixture
@@ -164,3 +168,54 @@ class TestAuditToolErrors:
         result = await get_change_audit(client)
         assert len(result) == 1
         assert "0" in result[0].text
+
+
+def _tools_records(caplog) -> list[logging.LogRecord]:
+    return [r for r in caplog.records if r.name == "lm_mcp.tools"]
+
+
+class TestHandleErrorLogsLMErrors:
+    """handle_error logs every LMError at WARNING with its code and details (R3.7)."""
+
+    def test_permission_error_logs_code_and_details(self, caplog):
+        """A 403 leaves one WARNING on lm_mcp.tools carrying the code and the details text."""
+        error = LMPermissionError("Permission denied")
+        error.details = "Token lacks the Manage role on group 42"
+
+        with caplog.at_level(logging.WARNING, logger="lm_mcp.tools"):
+            result = handle_error(error)
+
+        assert is_error_result(result)
+        records = _tools_records(caplog)
+        assert len(records) == 1
+        assert records[0].levelno == logging.WARNING
+        assert "PERMISSION_DENIED" in records[0].getMessage()
+        assert "Token lacks the Manage role on group 42" in records[0].getMessage()
+        assert "unhandled error" not in caplog.text
+
+    @respx.mock
+    async def test_server_error_after_retries_logs_the_raw_message(self, auth, caplog):
+        """A 500 that exhausted its retries logs the server's own message at WARNING."""
+        from lm_mcp.tools.batchjobs import get_batchjobs
+
+        client = LogicMonitorClient(
+            base_url="https://test.logicmonitor.com/santaba/rest",
+            auth=auth,
+            timeout=30,
+            api_version=3,
+            max_retries=0,
+        )
+        respx.get("https://test.logicmonitor.com/santaba/rest/setting/batchjobs").mock(
+            return_value=httpx.Response(
+                500, json={"errorMessage": "Backend unavailable: shard 3 is read-only"}
+            )
+        )
+
+        with caplog.at_level(logging.WARNING, logger="lm_mcp.tools"):
+            result = await get_batchjobs(client)
+
+        assert is_error_result(result)
+        records = _tools_records(caplog)
+        assert len(records) == 1
+        assert "SERVER_ERROR" in records[0].getMessage()
+        assert "Backend unavailable: shard 3 is read-only" in records[0].getMessage()

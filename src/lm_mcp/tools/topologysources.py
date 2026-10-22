@@ -130,7 +130,7 @@ async def create_topologysource(
         if overwrite and payload.get("name"):
             existing = await client.get(
                 "/setting/topologysources",
-                params={"filter": f'name:"{payload["name"]}"', "size": 1},
+                params={"filter": f"name:{quote_filter_value(payload['name'])}", "size": 1},
             )
             items = existing.get("items", [])
             if items:

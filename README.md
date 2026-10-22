@@ -398,7 +398,7 @@ documented at the top of the file.
 | `LM_HTTP_ALLOW_UNAUTHENTICATED` | No | `false` | Start on a non-loopback `LM_HTTP_HOST` with no `LM_HTTP_AUTH_TOKEN`, for a listener protected another way (an authenticating proxy, a private network). HTTP transport only. |
 | `LM_SESSION_ENABLED` | No | `true` | Enable session context tracking |
 | `LM_SESSION_HISTORY_SIZE` | No | `50` | Number of tool calls to keep in history |
-| `LM_LOG_LEVEL` | No | `warning` | Logging level: `debug`, `info`, `warning`, or `error` |
+| `LM_LOG_LEVEL` | No | `warning` | Logging level: `debug`, `info`, `warning`, or `error`. Records go to stderr; write audit lines (`info` for a success, `warning` for a failure) redact argument values under credential-shaped keys such as `password`, `token`, `api_key` and `extra_vars`, LogicMonitor credential properties such as `ssh.pass` and `snmp.community`, and a `property_value` whose `property_name` is one |
 | `LM_FIELD_VALIDATION` | No | `warn` | Field validation: `off`, `warn`, or `error` |
 | `LM_ENABLED_TOOLS` | No | - | Comma-separated tool names or glob patterns to enable (e.g., `get_*,triage`). Mutually exclusive with `LM_DISABLED_TOOLS`. |
 | `LM_DISABLED_TOOLS` | No | - | Comma-separated tool names or glob patterns to disable (e.g., `delete_*`). Mutually exclusive with `LM_ENABLED_TOOLS`. |
