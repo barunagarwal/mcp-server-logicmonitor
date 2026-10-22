@@ -2,7 +2,9 @@
 # Description: Validates forecast_metric, detect_change_points, classify_trend, detect_seasonality.
 
 import json
+import logging
 import math
+from unittest.mock import MagicMock, patch
 
 import httpx
 import pytest
@@ -374,6 +376,153 @@ class TestForecastMetricMethod:
         data = json.loads(result[0].text)
         cpu = data["forecasts"]["cpu"]
         assert cpu["method_used"] == "linear"
+
+
+def _make_watsonx_client():
+    """Build a real WatsonxClient through its constructor with the SDK classes patched."""
+    with (
+        patch("ibm_watsonx_ai.Credentials", return_value=MagicMock()),
+        patch("ibm_watsonx_ai.APIClient", return_value=MagicMock()),
+    ):
+        from lm_mcp.client.watsonx import WatsonxClient
+
+        return WatsonxClient(
+            api_key="test-key",
+            url="https://us-south.ml.cloud.ibm.com",
+            project_id="proj-123",
+        )
+
+
+async def _forecast_cpu(client, values, method, threshold=1000.0):
+    """Serve one cpu series and return its forecast entry."""
+    from lm_mcp.tools.forecasting import forecast_metric
+
+    respx.get(DATA_URL).mock(
+        return_value=httpx.Response(200, json=_make_metric_response(["cpu"], values))
+    )
+    result = await forecast_metric(
+        client,
+        device_id=1,
+        device_datasource_id=10,
+        instance_id=100,
+        threshold=threshold,
+        method=method,
+    )
+    return json.loads(result[0].text)["forecasts"]["cpu"]
+
+
+class TestForecastMethodLabels:
+    """R4.1: method_used names the method that produced the numbers; fallbacks say why."""
+
+    @respx.mock
+    async def test_ttm_without_watsonx_falls_back_with_reason(self, client, monkeypatch):
+        """method=ttm with no watsonx client reports linear and names watsonx."""
+        monkeypatch.setattr("lm_mcp.server._watsonx_client", None)
+        values = [[float(10 + i)] for i in range(600)]
+
+        cpu = await _forecast_cpu(client, values, method="ttm")
+
+        assert cpu["method_used"] == "linear"
+        assert "watsonx" in cpu["fallback_reason"]
+
+    @respx.mock
+    async def test_ttm_under_512_points_falls_back_with_reason(self, client, monkeypatch):
+        """method=ttm with watsonx but 100 points reports linear and the 512 minimum."""
+        wx = _make_watsonx_client()
+        wx._run_ttm_forecast = MagicMock()
+        monkeypatch.setattr("lm_mcp.server._watsonx_client", wx)
+        values = [[float(10 + i)] for i in range(100)]
+
+        cpu = await _forecast_cpu(client, values, method="ttm")
+
+        assert cpu["method_used"] == "linear"
+        assert "512" in cpu["fallback_reason"]
+        wx._run_ttm_forecast.assert_not_called()
+
+    @respx.mock
+    async def test_ttm_failure_falls_back_with_reason_and_warning(
+        self, client, monkeypatch, caplog
+    ):
+        """A TTM call that raises reports linear, the failure, and a WARNING."""
+        wx = _make_watsonx_client()
+        wx._run_ttm_forecast = MagicMock(side_effect=Exception("connection timeout"))
+        monkeypatch.setattr("lm_mcp.server._watsonx_client", wx)
+        values = [[float(10 + i)] for i in range(600)]
+
+        with caplog.at_level(logging.WARNING, logger="lm_mcp.tools.forecasting"):
+            cpu = await _forecast_cpu(client, values, method="ttm")
+
+        assert cpu["method_used"] == "linear"
+        assert "TTM" in cpu["fallback_reason"]
+        warnings = [
+            r
+            for r in caplog.records
+            if r.name == "lm_mcp.tools.forecasting" and r.levelno == logging.WARNING
+        ]
+        assert len(warnings) == 1
+        assert "TTM" in warnings[0].getMessage()
+
+    @respx.mock
+    async def test_ttm_success_is_labeled_ttm(self, client, monkeypatch):
+        """A TTM forecast that succeeds reports ttm and no fallback reason."""
+        from lm_mcp.client.watsonx import TTM_MODEL_ID
+
+        wx = _make_watsonx_client()
+        wx._run_ttm_forecast = MagicMock(
+            return_value={
+                "forecast_values": [70.0, 71.0, 72.0],
+                "forecast_count": 3,
+                "model": TTM_MODEL_ID,
+            }
+        )
+        monkeypatch.setattr("lm_mcp.server._watsonx_client", wx)
+        values = [[float(10 + i * 0.1)] for i in range(600)]
+
+        cpu = await _forecast_cpu(client, values, method="ttm")
+
+        assert cpu["method_used"] == "ttm"
+        assert "fallback_reason" not in cpu
+
+    @respx.mock
+    async def test_holt_winters_failure_falls_back_with_reason_and_warning(self, client, caplog):
+        """Five points cannot fill two seasons, so Holt-Winters raises and linear runs."""
+        values = [[float(10 + i * 10)] for i in range(5)]
+
+        with caplog.at_level(logging.WARNING, logger="lm_mcp.tools.forecasting"):
+            cpu = await _forecast_cpu(client, values, method="holt_winters")
+
+        assert cpu["method_used"] == "linear"
+        assert "Holt-Winters" in cpu["fallback_reason"]
+        warnings = [
+            r
+            for r in caplog.records
+            if r.name == "lm_mcp.tools.forecasting" and r.levelno == logging.WARNING
+        ]
+        assert len(warnings) == 1
+        assert "Holt-Winters" in warnings[0].getMessage()
+
+    @respx.mock
+    async def test_holt_winters_success_omits_r_squared(self, client):
+        """Holt-Winters has no regression fit, so r_squared is absent, not 0.0."""
+        values = [[float(50 + 10 * math.sin(2 * math.pi * i / 12))] for i in range(48)]
+
+        cpu = await _forecast_cpu(client, values, method="holt_winters", threshold=200.0)
+
+        assert cpu["method_used"] == "holt_winters"
+        assert "r_squared" not in cpu
+        assert "fallback_reason" not in cpu
+
+    @pytest.mark.parametrize("method", ["linear", "auto"])
+    @respx.mock
+    async def test_selected_linear_carries_no_fallback_reason(self, client, monkeypatch, method):
+        """Linear that was asked for, or chosen by auto, is not a fallback."""
+        monkeypatch.setattr("lm_mcp.server._watsonx_client", None)
+        values = [[float(10 + i)] for i in range(10)]
+
+        cpu = await _forecast_cpu(client, values, method=method)
+
+        assert cpu["method_used"] == "linear"
+        assert "fallback_reason" not in cpu
 
 
 class TestDetectChangePoints:

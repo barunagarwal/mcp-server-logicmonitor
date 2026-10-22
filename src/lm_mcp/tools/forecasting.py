@@ -53,7 +53,8 @@ async def forecast_metric(
 
     Returns:
         Per-datapoint forecast with slope, breach time, trend direction,
-        method_used, and confidence_interval.
+        method_used, and confidence_interval; fallback_reason says why linear
+        ran when the selected method could not.
     """
     try:
         series = await fetch_metric_series(
@@ -78,14 +79,21 @@ async def forecast_metric(
                 continue
 
             # Determine method to use
-            method_used = _select_forecast_method(
+            method_used, fallback_reason = _select_forecast_method(
                 method,
                 values,
                 timestamps,
                 hours_back,
             )
 
-            if method_used == "ttm":
+            if fallback_reason is not None:
+                forecast_result = _forecast_linear_fallback(
+                    values,
+                    timestamps,
+                    threshold,
+                    fallback_reason,
+                )
+            elif method_used == "ttm":
                 forecast_result = await _forecast_ttm(
                     values,
                     timestamps,
@@ -113,7 +121,6 @@ async def forecast_metric(
                         x_hours,
                     )
 
-            forecast_result["method_used"] = method_used
             forecasts[dp_name] = forecast_result
 
         return format_response(
@@ -134,7 +141,7 @@ def _select_forecast_method(
     values: list[float],
     timestamps: list[int],
     hours_back: int,
-) -> str:
+) -> tuple[str, str | None]:
     """Select the forecasting method based on data characteristics.
 
     Args:
@@ -144,24 +151,27 @@ def _select_forecast_method(
         hours_back: Hours of historical data.
 
     Returns:
-        The method to use: 'linear', 'holt_winters', or 'ttm'.
+        The method to use ('linear', 'holt_winters', or 'ttm') and, when an
+        explicitly requested method cannot run, the reason linear runs instead.
     """
     if method == "linear":
-        return "linear"
+        return "linear", None
     if method == "holt_winters":
-        return "holt_winters"
+        return "holt_winters", None
     if method == "ttm":
-        if _is_watsonx_available() and len(values) >= 512:
-            return "ttm"
-        return "linear"  # silent fallback
+        if not _is_watsonx_available():
+            return "linear", "TTM requested but watsonx is not configured"
+        if len(values) < 512:
+            return "linear", f"TTM needs at least 512 points; got {len(values)}"
+        return "ttm", None
 
     # Auto selection: prefer TTM when watsonx is configured and enough data
     if _is_watsonx_available() and len(values) >= 512:
-        return "ttm"
+        return "ttm", None
 
     # Fall through to statistical methods
     if hours_back < 168 or len(values) < 48:
-        return "linear"
+        return "linear", None
 
     # Check autocorrelation at standard periods to detect seasonality
     if len(timestamps) >= 2:
@@ -181,9 +191,9 @@ def _select_forecast_method(
     # Require strong seasonality and enough data for 2 full seasons
     min_season_len = 12
     if best_ac > 0.5 and len(values) >= 2 * min_season_len:
-        return "holt_winters"
+        return "holt_winters", None
 
-    return "linear"
+    return "linear", None
 
 
 def _is_watsonx_available() -> bool:
@@ -219,9 +229,12 @@ async def _forecast_ttm(
 
         wx = get_watsonx_client()
         if wx is None:
-            result = _forecast_linear_fallback(values, timestamps, threshold)
-            result["ttm_fallback_reason"] = "watsonx_not_configured"
-            return result
+            return _forecast_linear_fallback(
+                values,
+                timestamps,
+                threshold,
+                "TTM requested but watsonx is not configured",
+            )
 
         return await ttm_forecast_helper(
             watsonx_client=wx,
@@ -235,22 +248,25 @@ async def _forecast_ttm(
             exc,
             exc_info=True,
         )
-        result = _forecast_linear_fallback(values, timestamps, threshold)
-        result["ttm_fallback_reason"] = f"watsonx_error: {exc}"
-        return result
+        return _forecast_linear_fallback(
+            values,
+            timestamps,
+            threshold,
+            f"watsonx TTM forecast failed: {exc}",
+        )
 
 
 def _forecast_linear_fallback(
     values: list[float],
     timestamps: list[int],
     threshold: float,
+    fallback_reason: str,
 ) -> dict:
-    """Quick linear regression fallback when TTM is unavailable."""
+    """Linear regression forecast for when the selected method cannot run."""
     t0 = timestamps[0]
     x_hours = [(t - t0) / 3600.0 for t in timestamps]
     result = _forecast_linear(values, timestamps, threshold, t0, x_hours)
-    result["method_used"] = "linear"
-    result["ttm_fallback"] = True
+    result["fallback_reason"] = fallback_reason
     return result
 
 
@@ -312,6 +328,7 @@ def _forecast_linear(
         "predicted_breach_epoch": predicted_breach_epoch,
         "sample_count": len(values),
         "confidence_interval": conf_interval,
+        "method_used": "linear",
     }
 
 
@@ -353,9 +370,18 @@ def _forecast_holt_winters(
             season_length=season_length,
             forecast_periods=24,
         )
-    except ValueError:
-        # Fall back to linear if Holt-Winters fails
-        return _forecast_linear(values, timestamps, threshold, t0, x_hours)
+    except ValueError as exc:
+        logger.warning(
+            "Holt-Winters forecast failed; falling back to linear regression: %s",
+            exc,
+            exc_info=True,
+        )
+        return _forecast_linear_fallback(
+            values,
+            timestamps,
+            threshold,
+            f"Holt-Winters failed: {exc}",
+        )
 
     fitted = hw_result["fitted"]
     forecast_vals = hw_result["forecast"]
@@ -396,13 +422,13 @@ def _forecast_holt_winters(
         "threshold": threshold,
         "trend": trend,
         "slope_per_hour": round(recent_slope, 6),
-        "r_squared": 0.0,
         "days_until_breach": days_until_breach,
         "predicted_breach_epoch": predicted_breach_epoch,
         "sample_count": len(values),
         "season_length": season_length,
         "forecast_values": forecast_vals[:24],
         "confidence_interval": conf_interval,
+        "method_used": "holt_winters",
     }
 
 

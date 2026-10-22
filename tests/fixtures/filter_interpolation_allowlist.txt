@@ -34,7 +34,6 @@ networking.py: exporter_device_id
 networking.py: SEVERITY_MAP[severity.lower()]
 networking.py: start_epoch
 reports.py: group_id
-scoring.py: device_id
 scoring.py: min_severity
 scoring.py: start_epoch
 sdts.py: device_group_id

@@ -13,6 +13,7 @@ from lm_mcp.tools import (
     WILDCARD_STRIP_NOTE,
     format_response,
     handle_error,
+    paginated_response,
     quote_filter_value,
     require_write_permission,
     safe_total,
@@ -83,14 +84,8 @@ async def get_collectors(
                 }
             )
 
-        total = result.get("total", 0)
-        has_more = (offset + len(collectors)) < total
-
         response = {
-            "total": total,
-            "count": len(collectors),
-            "offset": offset,
-            "has_more": has_more,
+            **paginated_response(collectors, result, offset),
             "collectors": collectors,
         }
         if wildcards_stripped:

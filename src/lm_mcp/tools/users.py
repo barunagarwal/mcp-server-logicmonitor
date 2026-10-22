@@ -11,6 +11,7 @@ from lm_mcp.tools import (
     WILDCARD_STRIP_NOTE,
     format_response,
     handle_error,
+    paginated_response,
     quote_filter_value,
     require_write_permission,
     sanitize_filter_value,
@@ -73,14 +74,8 @@ async def get_users(
                 }
             )
 
-        total = result.get("total", 0)
-        has_more = (offset + len(users)) < total
-
         response = {
-            "total": total,
-            "count": len(users),
-            "offset": offset,
-            "has_more": has_more,
+            **paginated_response(users, result, offset),
             "users": users,
         }
         if wildcards_stripped:

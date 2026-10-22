@@ -372,7 +372,7 @@
           "type": "integer"
         },
         "group_id": {
-          "description": "Optional device group ID filter",
+          "description": "Optional device group ID filter; not with device_id or device_name",
           "type": "integer"
         },
         "hours_back": {
@@ -405,7 +405,7 @@
           "type": "integer"
         },
         "group_id": {
-          "description": "Filter to a device group",
+          "description": "Filter to a device group; not with device_id",
           "type": "integer"
         },
         "period_days": {

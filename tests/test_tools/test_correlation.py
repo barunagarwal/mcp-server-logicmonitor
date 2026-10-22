@@ -9,6 +9,7 @@ import respx
 
 from lm_mcp.auth.bearer import BearerAuth
 from lm_mcp.client import LogicMonitorClient
+from tests.alert_pages import alert_pages
 
 
 @pytest.fixture
@@ -431,6 +432,73 @@ class TestGetAlertStatistics:
 
         data = json.loads(result[0].text)
         assert data["time_window_hours"] == 12
+
+
+ALERTS_URL = "https://test.logicmonitor.com/santaba/rest/alert/alerts"
+
+
+def _paged_alerts(n):
+    """Build n alerts spread over four devices and two datasources."""
+    return [
+        _make_alert(i, f"dev-{i % 4}", f"DS-{i % 2}", start_epoch=BASE_EPOCH + i) for i in range(n)
+    ]
+
+
+class TestAlertWindowPaging:
+    """R4.2: alert statistics and correlation page through the window or say they stopped."""
+
+    @respx.mock
+    async def test_statistics_counts_every_page(self, client):
+        from lm_mcp.tools.correlation import get_alert_statistics
+
+        respx.get(ALERTS_URL).mock(side_effect=alert_pages(_paged_alerts(2500), lower_bound=True))
+
+        result = await get_alert_statistics(client, limit=5000)
+
+        summary = json.loads(result[0].text)["summary"]
+        assert summary["total"] == 2500
+        assert summary["truncated"] is False
+        assert summary["api_total"] == 2500
+        assert sum(d["count"] for d in summary["by_datasource"]) == 2500
+
+    @respx.mock
+    async def test_statistics_default_limit_declares_truncation(self, client):
+        from lm_mcp.tools.correlation import get_alert_statistics
+
+        respx.get(ALERTS_URL).mock(side_effect=alert_pages(_paged_alerts(2500), lower_bound=True))
+
+        result = await get_alert_statistics(client)
+
+        summary = json.loads(result[0].text)["summary"]
+        assert summary["total"] == 1000
+        assert summary["truncated"] is True
+        assert summary["api_total"] is None
+
+    @respx.mock
+    async def test_correlate_alerts_declares_truncation_and_api_total(self, client):
+        from lm_mcp.tools.correlation import correlate_alerts
+
+        respx.get(ALERTS_URL).mock(side_effect=alert_pages(_paged_alerts(6000)))
+
+        result = await correlate_alerts(client, limit=5000)
+
+        data = json.loads(result[0].text)
+        assert data["total_alerts"] == 5000
+        assert data["truncated"] is True
+        assert data["api_total"] == 6000
+
+    @respx.mock
+    async def test_correlate_alerts_complete_window(self, client):
+        from lm_mcp.tools.correlation import correlate_alerts
+
+        respx.get(ALERTS_URL).mock(side_effect=alert_pages(_paged_alerts(1500), lower_bound=True))
+
+        result = await correlate_alerts(client, limit=5000)
+
+        data = json.loads(result[0].text)
+        assert data["total_alerts"] == 1500
+        assert data["truncated"] is False
+        assert data["api_total"] == 1500
 
 
 class TestGetMetricAnomalies:

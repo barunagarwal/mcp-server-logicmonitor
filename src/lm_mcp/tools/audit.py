@@ -11,6 +11,7 @@ from lm_mcp.tools import (
     WILDCARD_STRIP_NOTE,
     format_response,
     handle_error,
+    paginated_response,
     quote_filter_value,
     sanitize_filter_value,
 )
@@ -85,14 +86,8 @@ async def get_audit_logs(
                 }
             )
 
-        total = result.get("total", 0)
-        has_more = (offset + len(logs)) < total
-
         response = {
-            "total": total,
-            "count": len(logs),
-            "offset": offset,
-            "has_more": has_more,
+            **paginated_response(logs, result, offset),
             "audit_logs": logs,
         }
         if wildcards_stripped:

@@ -20,6 +20,7 @@ from lm_mcp.tools import (
     resolve_group_filter,
     sanitize_filter_value,
 )
+from lm_mcp.tools.alerts import paginate_alerts
 from lm_mcp.tools.stats_helpers import (
     fetch_metric_series,
     iqr_anomalies,
@@ -211,20 +212,16 @@ async def correlate_alerts(
         device: Optional device name filter.
         group_id: Optional device group ID filter.
         severity: Optional severity filter (critical, error, warning, info).
-        limit: Maximum alerts to fetch (default: 500).
+        limit: Maximum alerts to fetch, paged and capped at 5000 (default: 500).
 
     Returns:
-        List of TextContent with correlation clusters or error.
+        List of TextContent with correlation clusters or error; truncated says
+        whether the limit cut the window short and api_total is the API's
+        count, null when it reported only a lower bound.
     """
     try:
         filter_str = await _build_alert_filter(client, hours_back, severity, device, group_id)
-        params: dict[str, Any] = {
-            "size": min(limit, 1000),
-            "filter": filter_str,
-        }
-
-        result = await client.get("/alert/alerts", params=params)
-        alerts = result.get("items", [])
+        alerts, truncated, api_total = await paginate_alerts(client, filter_str, cap=limit)
 
         # Build all cluster types
         device_clusters = _cluster_by_device(alerts)
@@ -236,6 +233,8 @@ async def correlate_alerts(
         return format_response(
             {
                 "total_alerts": len(alerts),
+                "truncated": truncated,
+                "api_total": api_total,
                 "cluster_count": len(all_clusters),
                 "time_window_hours": hours_back,
                 "clusters": all_clusters,
@@ -261,20 +260,16 @@ async def get_alert_statistics(
         device: Optional device name filter.
         group_id: Optional device group ID filter.
         bucket_size_hours: Size of each time bucket in hours (default: 1).
-        limit: Maximum alerts to fetch (default: 1000).
+        limit: Maximum alerts to fetch, paged and capped at 5000 (default: 1000).
 
     Returns:
-        List of TextContent with statistical summary or error.
+        List of TextContent with statistical summary or error; summary.truncated
+        says whether the limit cut the window short and summary.api_total is the
+        API's count, null when it reported only a lower bound.
     """
     try:
         filter_str = await _build_alert_filter(client, hours_back, device=device, group_id=group_id)
-        params: dict[str, Any] = {
-            "size": min(limit, 1000),
-            "filter": filter_str,
-        }
-
-        result = await client.get("/alert/alerts", params=params)
-        alerts = result.get("items", [])
+        alerts, truncated, api_total = await paginate_alerts(client, filter_str, cap=limit)
 
         # Count by severity
         by_severity: dict[str, int] = {
@@ -332,6 +327,8 @@ async def get_alert_statistics(
             {
                 "summary": {
                     "total": len(alerts),
+                    "truncated": truncated,
+                    "api_total": api_total,
                     "by_severity": by_severity,
                     "by_device": by_device,
                     "by_datasource": by_datasource,

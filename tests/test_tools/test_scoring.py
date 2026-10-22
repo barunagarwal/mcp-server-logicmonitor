@@ -10,6 +10,7 @@ import respx
 
 from lm_mcp.auth.bearer import BearerAuth
 from lm_mcp.client import LogicMonitorClient
+from tests.alert_pages import alert_pages
 
 
 @pytest.fixture
@@ -609,18 +610,24 @@ class TestCalculateAvailability:
         assert "Error:" in result[0].text
 
     @respx.mock
-    async def test_device_id_filter(self, client):
-        """Device ID filter is passed to the API."""
+    async def test_device_id_reads_the_device_alerts(self, client):
+        """device_id reads /device/devices/{id}/alerts; the alerts list ignores monitorObjectId."""
         from lm_mcp.tools.scoring import calculate_availability
 
-        route = respx.get(ALERT_URL).mock(
+        respx.get(DEVICE_URL_TEMPLATE.format(id=42)).mock(
+            return_value=httpx.Response(200, json={"id": 42, "displayName": "server42"})
+        )
+        route = respx.get(DEVICE_ALERTS_URL_TEMPLATE.format(id=42)).mock(
             return_value=httpx.Response(200, json={"items": [], "total": 0})
         )
 
-        await calculate_availability(client, device_id=42)
+        result = await calculate_availability(client, device_id=42)
 
-        params = dict(route.calls[0].request.url.params)
-        assert "monitorObjectId:42" in params.get("filter", "")
+        assert json.loads(result[0].text)["device_id"] == 42
+        assert route.call_count == 1
+        clauses = route.calls[0].request.url.params["filter"].split(",")
+        assert clauses[0].startswith("startEpoch>:")
+        assert clauses[1:] == ["severity>:3"]
 
     @respx.mock
     async def test_availability_filters_by_device_id(self, client):
@@ -638,33 +645,17 @@ class TestCalculateAvailability:
             )
         )
 
-        # Return alerts from target AND a different device
-        alerts = [
-            {
-                "id": "A1",
-                "severity": 3,
-                "monitorObjectName": "target-server",
-                "startEpoch": recent,
-                "endEpoch": recent + 300,
-            },
-            {
-                "id": "A2",
-                "severity": 3,
-                "monitorObjectName": "other-server",
-                "startEpoch": recent,
-                "endEpoch": recent + 300,
-            },
-        ]
-        respx.get(ALERT_URL).mock(
-            return_value=httpx.Response(200, json={"items": alerts, "total": 2})
+        # The device-scoped endpoint returns only the target's alerts
+        alerts = [_device_alert("A1", 100, "target-server", recent, recent + 300)]
+        respx.get(DEVICE_ALERTS_URL_TEMPLATE.format(id=100)).mock(
+            return_value=httpx.Response(200, json={"items": alerts, "total": 1})
         )
 
         result = await calculate_availability(client, device_id=100, hours_back=24)
         data = json.loads(result[0].text)
 
-        # Should only include target-server, not other-server
-        assert "target-server" in data.get("by_device", {})
-        assert "other-server" not in data.get("by_device", {})
+        # The device's own alert list is the scope, counted under its name
+        assert list(data["by_device"]) == ["target-server"]
 
 
 # Base epoch for metric data
@@ -1172,15 +1163,15 @@ class TestCalculateAvailabilityDeviceLookup:
 
     Prior behavior: a 404/403 on the device lookup proceeded with
     unfiltered alerts, producing availability numbers for a different
-    device set than the caller asked for. Now an unreachable device must
-    return a structured DEVICE_LOOKUP_FAILED error envelope.
+    device set than the caller asked for. Now a device that does not exist
+    returns DEVICE_NOT_FOUND and any other lookup failure returns
+    DEVICE_LOOKUP_FAILED, both before any alert is read.
     """
 
     @respx.mock
     async def test_404_on_device_lookup_returns_structured_error(self, client):
         from lm_mcp.tools.scoring import calculate_availability
 
-        respx.get(ALERT_URL).mock(return_value=httpx.Response(200, json={"items": [], "total": 0}))
         respx.get(DEVICE_URL_TEMPLATE.format(id=99999)).mock(
             return_value=httpx.Response(404, json={"errorMessage": "Device not found"})
         )
@@ -1195,7 +1186,6 @@ class TestCalculateAvailabilityDeviceLookup:
     async def test_403_on_device_lookup_returns_structured_error(self, client):
         from lm_mcp.tools.scoring import calculate_availability
 
-        respx.get(ALERT_URL).mock(return_value=httpx.Response(200, json={"items": [], "total": 0}))
         respx.get(DEVICE_URL_TEMPLATE.format(id=42)).mock(
             return_value=httpx.Response(403, json={"errorMessage": "Forbidden"})
         )
@@ -1205,31 +1195,16 @@ class TestCalculateAvailabilityDeviceLookup:
         assert "Error:" in result[0].text
 
     @respx.mock
-    async def test_successful_device_lookup_still_filters_alerts(self, client):
-        """Happy path remains: device lookup returns name, alerts filter by name."""
+    async def test_successful_device_lookup_reads_device_alerts(self, client):
+        """Happy path: the device resolves, then its own alerts are read by id."""
         from lm_mcp.tools.scoring import calculate_availability
 
-        respx.get(ALERT_URL).mock(
+        respx.get(DEVICE_ALERTS_URL_TEMPLATE.format(id=100)).mock(
             return_value=httpx.Response(
                 200,
                 json={
-                    "items": [
-                        {
-                            "id": "a1",
-                            "severity": 3,
-                            "monitorObjectName": "server1",
-                            "startEpoch": int(time.time()) - 1000,
-                            "endEpoch": 0,
-                        },
-                        {
-                            "id": "a2",
-                            "severity": 3,
-                            "monitorObjectName": "other-server",
-                            "startEpoch": int(time.time()) - 2000,
-                            "endEpoch": 0,
-                        },
-                    ],
-                    "total": 2,
+                    "items": [_device_alert("a1", 100, "server1", int(time.time()) - 1000, 0)],
+                    "total": 1,
                 },
             )
         )
@@ -1242,9 +1217,8 @@ class TestCalculateAvailabilityDeviceLookup:
         result = await calculate_availability(client, device_id=100, hours_back=24)
 
         data = json.loads(result[0].text)
-        # Filtered to server1 only -- prior bug would have included both alerts.
         assert "error" not in data or data.get("error") is False
-        assert "by_device" in data
+        assert list(data["by_device"]) == ["server1"]
 
 
 class TestCalculateErrorBudgetSubToolHardening:
@@ -1264,7 +1238,6 @@ class TestCalculateErrorBudgetSubToolHardening:
         # calculate_availability will return an Error envelope because the
         # device lookup 404s. Without the call_sub_tool routing, this
         # would JSONDecodeError below.
-        respx.get(ALERT_URL).mock(return_value=httpx.Response(200, json={"items": [], "total": 0}))
         respx.get(DEVICE_URL_TEMPLATE.format(id=99999)).mock(
             return_value=httpx.Response(404, json={"errorMessage": "Device not found"})
         )
@@ -1281,3 +1254,273 @@ class TestCalculateErrorBudgetSubToolHardening:
         # The JSONDecodeError message ("Expecting value: line 1 column 1")
         # must NOT appear -- that was the v3.8.2-pattern regression signal.
         assert "Expecting value" not in text
+
+
+DEVICES_URL = "https://test.logicmonitor.com/santaba/rest/device/devices"
+DEVICE_ALERTS_URL_TEMPLATE = DEVICES_URL + "/{id}/alerts"
+
+
+def _device_alert(alert_id, device_id, name, start_epoch, end_epoch, severity=3):
+    """An alert as /device/devices/{id}/alerts returns it: the id is the device's."""
+    return {
+        "id": f"LMA{alert_id}",
+        "severity": severity,
+        "monitorObjectId": device_id,
+        "monitorObjectType": "device",
+        "monitorObjectName": name,
+        "startEpoch": start_epoch,
+        "endEpoch": end_epoch,
+        "cleared": end_epoch > 0,
+    }
+
+
+class TestScoreAlertNoisePaging:
+    """R4.2: score_alert_noise scores the whole window or says the cap cut it short."""
+
+    @respx.mock
+    async def test_scores_every_page(self, client):
+        from lm_mcp.tools.scoring import score_alert_noise
+
+        alerts = [
+            _make_alert(i, f"dev-{i % 5}", f"DS-{i % 3}", start_epoch=BASE_EPOCH + i)
+            for i in range(2500)
+        ]
+        respx.get(ALERT_URL).mock(side_effect=alert_pages(alerts, lower_bound=True))
+
+        result = await score_alert_noise(client)
+
+        data = json.loads(result[0].text)
+        assert data["total_alerts"] == 2500
+        assert sum(d["count"] for d in data["top_noisy_devices"]) == 2500
+        assert data["truncated"] is False
+        assert data["api_total"] == 2500
+
+    @respx.mock
+    async def test_capped_window_is_declared(self, client):
+        from lm_mcp.tools.scoring import score_alert_noise
+
+        alerts = [
+            _make_alert(i, f"dev-{i % 5}", "DS", start_epoch=BASE_EPOCH + i) for i in range(6000)
+        ]
+        respx.get(ALERT_URL).mock(side_effect=alert_pages(alerts, lower_bound=True))
+
+        result = await score_alert_noise(client)
+
+        data = json.loads(result[0].text)
+        assert data["total_alerts"] == 5000
+        assert data["truncated"] is True
+        assert data["api_total"] is None
+
+
+class TestAvailabilityResolvesDevice:
+    """R4.3: calculate_availability resolves the device first and reads its alerts by id."""
+
+    @respx.mock
+    async def test_unknown_device_name_is_an_error_not_full_availability(self, client):
+        from lm_mcp.tools import ErrorContent
+        from lm_mcp.tools.scoring import calculate_availability
+
+        route = respx.get(DEVICES_URL).mock(
+            return_value=httpx.Response(200, json={"items": [], "total": 0})
+        )
+
+        result = await calculate_availability(client, device_name="nope")
+
+        assert isinstance(result[0], ErrorContent)
+        assert "not found" in result[0].text.lower()
+        assert "nope" in result[0].text
+        assert route.calls[0].request.url.params["filter"] == 'displayName:"nope"'
+
+    @respx.mock
+    async def test_unknown_device_id_is_not_found(self, client):
+        from lm_mcp.tools import ErrorContent
+        from lm_mcp.tools.scoring import calculate_availability
+
+        respx.get(DEVICE_URL_TEMPLATE.format(id=99999)).mock(
+            return_value=httpx.Response(404, json={"errorMessage": "Device not found"})
+        )
+
+        result = await calculate_availability(client, device_id=99999)
+
+        assert isinstance(result[0], ErrorContent)
+        assert "not found" in result[0].text.lower()
+        assert "99999" in result[0].text
+
+    @respx.mock
+    async def test_device_id_counts_alerts_recorded_under_an_earlier_name(self, client):
+        from lm_mcp.tools.scoring import calculate_availability
+
+        now = int(time.time())
+        respx.get(DEVICE_URL_TEMPLATE.format(id=5)).mock(
+            return_value=httpx.Response(200, json={"id": 5, "displayName": "web-02"})
+        )
+        alerts = [
+            _device_alert(1, 5, "web-01", now - 7200, now - 6600),
+            _device_alert(2, 5, "web-02", now - 3600, now - 3000),
+        ]
+        route = respx.get(DEVICE_ALERTS_URL_TEMPLATE.format(id=5)).mock(
+            side_effect=alert_pages(alerts)
+        )
+
+        result = await calculate_availability(client, device_id=5, hours_back=24)
+
+        data = json.loads(result[0].text)
+        assert data["incident_count"] == 2
+        assert list(data["by_device"]) == ["web-02"]
+        assert data["by_device"]["web-02"]["incident_count"] == 2
+        assert data["device_resolved"] is True
+        assert data["device_id"] == 5
+        assert "monitorObject" not in route.calls[0].request.url.params["filter"]
+
+    @respx.mock
+    async def test_device_name_resolves_to_the_device_alerts(self, client):
+        from lm_mcp.tools.scoring import calculate_availability
+
+        now = int(time.time())
+        respx.get(DEVICES_URL).mock(
+            return_value=httpx.Response(
+                200, json={"items": [{"id": 5, "displayName": "web-02"}], "total": 1}
+            )
+        )
+        alerts = [
+            _device_alert(1, 5, "web-01", now - 7200, now - 6600),
+            _device_alert(2, 5, "web-02", now - 3600, now - 3000),
+        ]
+        respx.get(DEVICE_ALERTS_URL_TEMPLATE.format(id=5)).mock(side_effect=alert_pages(alerts))
+
+        result = await calculate_availability(client, device_name="web-02", hours_back=24)
+
+        data = json.loads(result[0].text)
+        assert data["incident_count"] == 2
+        assert data["device_id"] == 5
+
+    @respx.mock
+    async def test_resolved_device_without_alerts_is_fully_available(self, client):
+        from lm_mcp.tools.scoring import calculate_availability
+
+        respx.get(DEVICE_URL_TEMPLATE.format(id=5)).mock(
+            return_value=httpx.Response(200, json={"id": 5, "displayName": "web-02"})
+        )
+        respx.get(DEVICE_ALERTS_URL_TEMPLATE.format(id=5)).mock(
+            return_value=httpx.Response(200, json={"items": [], "total": 0})
+        )
+
+        result = await calculate_availability(client, device_id=5)
+
+        data = json.loads(result[0].text)
+        assert data["availability_percent"] == 100.0
+        assert data["incident_count"] == 0
+        assert data["device_resolved"] is True
+        assert data["truncated"] is False
+
+    @respx.mock
+    async def test_capped_window_is_declared(self, client):
+        from lm_mcp.tools.scoring import calculate_availability
+
+        now = int(time.time())
+        alerts = [
+            _make_alert(
+                i, f"dev-{i % 7}", "DS", severity=3, start_epoch=now - 7200 + i, end_epoch=now - 60
+            )
+            for i in range(6000)
+        ]
+        respx.get(ALERT_URL).mock(side_effect=alert_pages(alerts, lower_bound=True))
+
+        result = await calculate_availability(client, hours_back=24)
+
+        data = json.loads(result[0].text)
+        assert data["truncated"] is True
+        assert data["api_total"] is None
+
+
+class TestResolveDevice:
+    """R4.3: _resolve_device separates a missing device from a failed lookup by code."""
+
+    @respx.mock
+    async def test_missing_device_id_is_device_not_found(self, client):
+        from lm_mcp.tools.scoring import _resolve_device
+
+        respx.get(DEVICE_URL_TEMPLATE.format(id=99999)).mock(
+            return_value=httpx.Response(404, json={"errorMessage": "Device not found"})
+        )
+
+        assert (await _resolve_device(client, 99999, None))["code"] == "DEVICE_NOT_FOUND"
+
+    @respx.mock
+    async def test_missing_device_name_is_device_not_found(self, client):
+        from lm_mcp.tools.scoring import _resolve_device
+
+        respx.get(DEVICES_URL).mock(
+            return_value=httpx.Response(200, json={"items": [], "total": 0})
+        )
+
+        assert (await _resolve_device(client, None, "nope"))["code"] == "DEVICE_NOT_FOUND"
+
+    @respx.mock
+    async def test_forbidden_lookup_is_device_lookup_failed(self, client):
+        from lm_mcp.tools.scoring import _resolve_device
+
+        respx.get(DEVICE_URL_TEMPLATE.format(id=42)).mock(
+            return_value=httpx.Response(403, json={"errorMessage": "Forbidden"})
+        )
+
+        assert (await _resolve_device(client, 42, None))["code"] == "DEVICE_LOOKUP_FAILED"
+
+    @respx.mock
+    async def test_resolved_device_carries_id_and_name(self, client):
+        from lm_mcp.tools.scoring import _resolve_device
+
+        respx.get(DEVICES_URL).mock(
+            return_value=httpx.Response(
+                200, json={"items": [{"id": 5, "displayName": "web-02"}], "total": 1}
+            )
+        )
+
+        assert await _resolve_device(client, None, "web-02") == {"id": 5, "displayName": "web-02"}
+
+
+class TestAvailabilityDeviceWithGroup:
+    """R4.3: a device and a group together have no single scope, so they are refused."""
+
+    @pytest.mark.parametrize(
+        "device_args", [{"device_id": 5}, {"device_name": "web-02"}], ids=["id", "name"]
+    )
+    @respx.mock
+    async def test_device_with_group_is_refused_before_any_read(self, client, device_args):
+        from lm_mcp.tools import ErrorContent
+        from lm_mcp.tools.scoring import calculate_availability
+
+        result = await calculate_availability(client, group_id=7, **device_args)
+
+        assert isinstance(result[0], ErrorContent)
+        assert "group_id" in result[0].text
+        assert "not both" in result[0].text
+        assert len(respx.calls) == 0
+
+    @respx.mock
+    async def test_error_budget_surfaces_the_refusal(self, client):
+        from lm_mcp.tools import ErrorContent
+        from lm_mcp.tools.scoring import calculate_error_budget
+
+        result = await calculate_error_budget(client, device_id=5, group_id=7)
+
+        assert isinstance(result[0], ErrorContent)
+        assert "not both" in result[0].text
+        assert len(respx.calls) == 0
+
+    @respx.mock
+    async def test_group_alone_reads_the_group_alerts(self, client):
+        from lm_mcp.tools.scoring import calculate_availability
+
+        respx.get(f"{DEVICES_URL.rsplit('/', 1)[0]}/groups/7").mock(
+            return_value=httpx.Response(200, json={"id": 7, "fullPath": "Sites/East"})
+        )
+        route = respx.get(ALERT_URL).mock(
+            return_value=httpx.Response(200, json={"items": [], "total": 0})
+        )
+
+        result = await calculate_availability(client, group_id=7)
+
+        data = json.loads(result[0].text)
+        assert data["availability_percent"] == 100.0
+        assert 'monitorObjectGroups~"Sites/East"' in route.calls[0].request.url.params["filter"]

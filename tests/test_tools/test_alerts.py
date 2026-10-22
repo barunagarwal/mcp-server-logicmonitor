@@ -9,6 +9,7 @@ import respx
 
 from lm_mcp.auth.bearer import BearerAuth
 from lm_mcp.client import LogicMonitorClient
+from tests.alert_pages import alert_pages
 
 
 @pytest.fixture
@@ -641,3 +642,115 @@ class TestIncludeMessageParam:
 
         await get_alert_details(client, "LMA1")
         assert "needMessage" not in route.calls[1].request.url.params
+
+
+def _window_alerts(n):
+    """Build n distinct alerts for the paged alert responder."""
+    return [{"id": f"LMA{i}", "severity": 3, "startEpoch": 1705276800 + i} for i in range(n)]
+
+
+class TestPaginateAlerts:
+    """R4.2: paginate_alerts pages to the API total and reports when the cap binds."""
+
+    ALERTS_URL = "https://test.logicmonitor.com/santaba/rest/alert/alerts"
+
+    @pytest.mark.parametrize("lower_bound", [False, True], ids=["exact", "lower_bound"])
+    @respx.mock
+    async def test_collects_every_page_below_the_cap(self, client, lower_bound):
+        from lm_mcp.tools.alerts import paginate_alerts
+
+        route = respx.get(self.ALERTS_URL).mock(
+            side_effect=alert_pages(_window_alerts(2500), lower_bound=lower_bound)
+        )
+
+        alerts, truncated, api_total = await paginate_alerts(client, "cleared:false")
+
+        assert len(alerts) == 2500
+        assert len({a["id"] for a in alerts}) == 2500
+        assert truncated is False
+        assert api_total == 2500
+        offsets = [call.request.url.params["offset"] for call in route.calls]
+        assert offsets == ["0", "1000", "2000"]
+
+    @respx.mock
+    async def test_cap_binds_with_an_exact_total(self, client):
+        from lm_mcp.tools.alerts import paginate_alerts
+
+        respx.get(self.ALERTS_URL).mock(side_effect=alert_pages(_window_alerts(6000)))
+
+        alerts, truncated, api_total = await paginate_alerts(client, "cleared:false")
+
+        assert len(alerts) == 5000
+        assert truncated is True
+        assert api_total == 6000
+
+    @respx.mock
+    async def test_cap_binds_with_a_lower_bound_total(self, client):
+        """The portal's last capped page says only that more exist, so the total is unknown."""
+        from lm_mcp.tools.alerts import paginate_alerts
+
+        respx.get(self.ALERTS_URL).mock(
+            side_effect=alert_pages(_window_alerts(6000), lower_bound=True)
+        )
+
+        alerts, truncated, api_total = await paginate_alerts(client, "cleared:false")
+
+        assert len(alerts) == 5000
+        assert truncated is True
+        assert api_total is None
+
+    @pytest.mark.parametrize("lower_bound", [False, True], ids=["exact", "lower_bound"])
+    @respx.mock
+    async def test_a_window_of_exactly_the_cap_is_complete(self, client, lower_bound):
+        from lm_mcp.tools.alerts import paginate_alerts
+
+        respx.get(self.ALERTS_URL).mock(
+            side_effect=alert_pages(_window_alerts(5000), lower_bound=lower_bound)
+        )
+
+        alerts, truncated, api_total = await paginate_alerts(client, "cleared:false")
+
+        assert len(alerts) == 5000
+        assert truncated is False
+        assert api_total == 5000
+
+    @respx.mock
+    async def test_a_smaller_cap_sizes_the_request(self, client):
+        from lm_mcp.tools.alerts import paginate_alerts
+
+        route = respx.get(self.ALERTS_URL).mock(
+            side_effect=alert_pages(_window_alerts(2500), lower_bound=True)
+        )
+
+        alerts, truncated, api_total = await paginate_alerts(client, "cleared:false", cap=100)
+
+        assert len(alerts) == 100
+        assert truncated is True
+        assert api_total is None
+        assert [call.request.url.params["size"] for call in route.calls] == ["100"]
+
+    @respx.mock
+    async def test_a_cap_of_zero_reads_nothing_and_knows_no_total(self, client):
+        """No page was read, so the API's count is unknown, not zero."""
+        from lm_mcp.tools.alerts import paginate_alerts
+
+        route = respx.get(self.ALERTS_URL).mock(side_effect=alert_pages(_window_alerts(10)))
+
+        alerts, truncated, api_total = await paginate_alerts(client, "cleared:false", cap=0)
+
+        assert alerts == []
+        assert truncated is False
+        assert api_total is None
+        assert route.call_count == 0
+
+    @respx.mock
+    async def test_a_larger_cap_is_clamped_to_the_hard_cap(self, client):
+        from lm_mcp.tools.alerts import MAX_ALERTS_PER_WINDOW, paginate_alerts
+
+        respx.get(self.ALERTS_URL).mock(side_effect=alert_pages(_window_alerts(6000)))
+
+        alerts, truncated, _ = await paginate_alerts(client, "cleared:false", cap=10_000)
+
+        assert MAX_ALERTS_PER_WINDOW == 5000
+        assert len(alerts) == 5000
+        assert truncated is True

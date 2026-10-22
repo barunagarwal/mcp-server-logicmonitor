@@ -16,9 +16,9 @@ from lm_mcp.tools import (
     handle_error,
     quote_filter_value,
     resolve_group_filter,
-    safe_total,
     sanitize_filter_value,
 )
+from lm_mcp.tools.alerts import ALERT_WINDOW_TRUNCATED_WARNING, paginate_alerts
 
 if TYPE_CHECKING:
     from lm_mcp.client import LogicMonitorClient
@@ -47,9 +47,8 @@ _DEFAULT_POWER_PATTERNS = (
     "Power_",
 )
 
-# Hard cap on alerts pulled per burst/flap analysis window.
-_MAX_ALERTS_PER_WINDOW = 5000
-_ALERTS_PAGE_SIZE = 1000
+# Flows requested per get_top_talkers call.
+_FLOWS_PAGE_SIZE = 1000
 
 # Valid group_by values for get_top_talkers.
 _TOP_TALKERS_GROUP_BY = frozenset({"src_ip", "dst_ip", "application", "protocol", "src_dst_pair"})
@@ -225,7 +224,7 @@ async def get_top_talkers(
         start_epoch = end_epoch - (hours_back * 3600)
 
         params: dict = {
-            "size": _ALERTS_PAGE_SIZE,
+            "size": _FLOWS_PAGE_SIZE,
             "filter": (
                 f"exporterDeviceId:{exporter_device_id},"
                 f"startEpoch>:{start_epoch},startEpoch<:{end_epoch}"
@@ -233,6 +232,16 @@ async def get_top_talkers(
         }
         result = await client.get("/netflow/flows", params=params)
         flows = result.get("items", [])
+
+        # The flow list is read as one page. A negative total (a lower bound),
+        # a total past the page, or a full page with no total means flows were
+        # left unread.
+        raw_total = result.get("total")
+        if raw_total is None:
+            truncated = len(flows) >= _FLOWS_PAGE_SIZE
+        else:
+            truncated = raw_total < 0 or len(flows) < raw_total
+        api_total = raw_total if raw_total is not None and raw_total >= 0 else None
 
         aggregated: dict[str, dict] = defaultdict(
             lambda: {"total_bytes": 0, "total_packets": 0, "flow_count": 0}
@@ -275,6 +284,8 @@ async def get_top_talkers(
             "window_hours": hours_back,
             "group_by": group_by,
             "flows_analyzed": len(flows),
+            "truncated": truncated,
+            "api_total": api_total,
             "total_bytes_in_window": total_bytes,
             "top_talkers": top,
         }
@@ -359,8 +370,7 @@ async def detect_alert_burst(
             wildcards_stripped = wildcards_stripped or was_modified
             filters.append(f"monitorObjectName~{quote_filter_value(clean_device)}")
 
-        alerts = await _paginate_alerts(client, ",".join(filters))
-        truncated = len(alerts) >= _MAX_ALERTS_PER_WINDOW
+        alerts, truncated, _ = await paginate_alerts(client, ",".join(filters))
 
         if datasource_pattern:
             needle = datasource_pattern.lower()
@@ -385,10 +395,7 @@ async def detect_alert_burst(
             "bursts": bursts,
         }
         if truncated:
-            response["warning"] = (
-                f"Truncated at {_MAX_ALERTS_PER_WINDOW} alerts. "
-                "Narrow the window or scope for complete analysis."
-            )
+            response["warning"] = ALERT_WINDOW_TRUNCATED_WARNING
         if wildcards_stripped:
             response["note"] = (
                 "Wildcard characters stripped from device filter — the ~ operator "
@@ -497,7 +504,7 @@ async def get_link_flaps(
             wildcards_stripped = wildcards_stripped or was_modified
             filters.append(f"monitorObjectName~{quote_filter_value(clean_device)}")
 
-        alerts = await _paginate_alerts(client, ",".join(filters))
+        alerts, truncated, _ = await paginate_alerts(client, ",".join(filters))
 
         pattern_re = re.compile(interface_pattern, re.IGNORECASE)
         interface_alerts = [a for a in alerts if pattern_re.search(a.get("dataSourceName") or "")]
@@ -539,6 +546,8 @@ async def get_link_flaps(
             "flapping_interfaces": len(flaps),
             "results": top_flaps,
         }
+        if truncated:
+            response["warning"] = ALERT_WINDOW_TRUNCATED_WARNING
         if wildcards_stripped:
             response["note"] = (
                 "Wildcard characters stripped from device filter — the ~ operator "
@@ -590,7 +599,7 @@ async def get_power_events(
             wildcards_stripped = wildcards_stripped or was_modified
             filters.append(f"monitorObjectName~{quote_filter_value(clean_device)}")
 
-        alerts = await _paginate_alerts(client, ",".join(filters))
+        alerts, truncated, _ = await paginate_alerts(client, ",".join(filters))
 
         active_patterns = patterns or list(_DEFAULT_POWER_PATTERNS)
         lower_patterns = [p.lower() for p in active_patterns]
@@ -628,6 +637,8 @@ async def get_power_events(
             "patterns_matched_counts": dict(pattern_counts),
             "events": matched,
         }
+        if truncated:
+            response["warning"] = ALERT_WINDOW_TRUNCATED_WARNING
         if wildcards_stripped:
             response["note"] = (
                 "Wildcard characters stripped from device filter — the ~ operator "
@@ -636,28 +647,3 @@ async def get_power_events(
         return format_response(response)
     except Exception as e:
         return handle_error(e)
-
-
-async def _paginate_alerts(
-    client: LogicMonitorClient,
-    filter_str: str,
-) -> list[dict]:
-    """Pull alerts across pages up to the analysis cap."""
-    collected: list[dict] = []
-    offset = 0
-    while len(collected) < _MAX_ALERTS_PER_WINDOW:
-        params: dict = {
-            "size": _ALERTS_PAGE_SIZE,
-            "offset": offset,
-            "filter": filter_str,
-        }
-        result = await client.get("/alert/alerts", params=params)
-        items = result.get("items", [])
-        if not items:
-            break
-        collected.extend(items)
-        total = safe_total(result)
-        if offset + len(items) >= total:
-            break
-        offset += len(items)
-    return collected[:_MAX_ALERTS_PER_WINDOW]

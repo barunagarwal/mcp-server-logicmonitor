@@ -12,6 +12,7 @@ from lm_mcp.tools import (
     format_response,
     handle_error,
     normalize_definition_fields,
+    paginated_response,
     quote_filter_value,
     require_write_permission,
     sanitize_filter_value,
@@ -86,14 +87,8 @@ async def get_configsources(
                 }
             )
 
-        total = result.get("total", 0)
-        has_more = (offset + len(sources)) < total
-
         response = {
-            "total": total,
-            "count": len(sources),
-            "offset": offset,
-            "has_more": has_more,
+            **paginated_response(sources, result, offset),
             "configsources": sources,
         }
         if wildcards_stripped:
@@ -286,16 +281,10 @@ async def get_configsource_update_reasons(
                 }
             )
 
-        total = result.get("total", 0)
-        has_more = (offset + len(reasons)) < total
-
         return format_response(
             {
                 "configsource_id": configsource_id,
-                "total": total,
-                "count": len(reasons),
-                "offset": offset,
-                "has_more": has_more,
+                **paginated_response(reasons, result, offset),
                 "update_reasons": reasons,
             }
         )
@@ -359,18 +348,12 @@ async def get_device_config(
                 }
             )
 
-        total = result.get("total", 0)
-        has_more = (offset + len(configs)) < total
-
         return format_response(
             {
                 "device_id": device_id,
                 "device_datasource_id": device_datasource_id,
                 "instance_id": instance_id,
-                "total": total,
-                "count": len(configs),
-                "offset": offset,
-                "has_more": has_more,
+                **paginated_response(configs, result, offset),
                 "configs": configs,
             }
         )

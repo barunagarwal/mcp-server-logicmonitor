@@ -12,6 +12,7 @@ from typing import TYPE_CHECKING, Any
 from mcp.types import TextContent
 
 from lm_mcp.tools import format_response, handle_error
+from lm_mcp.tools.alerts import paginate_alerts
 
 if TYPE_CHECKING:
     from lm_mcp.client import LogicMonitorClient
@@ -44,13 +45,8 @@ async def correlate_changes(
         start_epoch = now_epoch - (hours_back * 3600)
         window_seconds = correlation_window_minutes * 60
 
-        # Fetch alerts (active + cleared)
-        alert_params: dict[str, Any] = {
-            "size": 1000,
-            "filter": f"startEpoch>:{start_epoch}",
-        }
-        alert_result = await client.get("/alert/alerts", params=alert_params)
-        alerts = alert_result.get("items", [])
+        # Fetch the window's alerts; with no cleared filter the list holds active alerts only
+        alerts, truncated, api_total = await paginate_alerts(client, f"startEpoch>:{start_epoch}")
 
         # Fetch audit/change logs
         audit_params: dict[str, Any] = {
@@ -160,8 +156,10 @@ async def correlate_changes(
             s for s in spike_buckets if s["timestamp"] not in correlated_spike_ts
         ]
 
-        response = {
+        response: dict[str, Any] = {
             "total_alerts": len(alerts),
+            "truncated": truncated,
+            "api_total": api_total,
             "total_changes": len(changes),
             "total_spikes": len(spike_buckets),
             "correlated_events": correlated_events,

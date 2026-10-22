@@ -4874,7 +4874,9 @@ TOOLS.extend(
                     },
                     "group_id": {
                         "type": "integer",
-                        "description": "Optional device group ID filter",
+                        "description": (
+                            "Optional device group ID filter; not with device_id or device_name"
+                        ),
                     },
                     "hours_back": {
                         "type": "integer",
@@ -5001,7 +5003,7 @@ TOOLS.extend(
                     },
                     "group_id": {
                         "type": "integer",
-                        "description": "Filter to a device group",
+                        "description": "Filter to a device group; not with device_id",
                     },
                     "target_slo": {
                         "type": "number",

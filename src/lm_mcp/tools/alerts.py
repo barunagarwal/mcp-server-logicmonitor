@@ -1,5 +1,6 @@
 # Description: Alert management tools for LogicMonitor MCP server.
-# Description: Provides get_alerts, get_alert_details, acknowledge_alert, add_alert_note.
+# Description: Provides get_alerts, get_alert_details, acknowledge_alert, add_alert_note,
+# and paginate_alerts, the capped alert-window read the analytics tools share.
 
 from __future__ import annotations
 
@@ -12,16 +13,71 @@ from lm_mcp.tools import (
     WILDCARD_STRIP_NOTE,
     format_response,
     handle_error,
+    paginated_response,
     portal_url,
     quote_filter_value,
     require_write_permission,
     resolve_group_filter,
-    safe_total,
     sanitize_filter_value,
 )
 
 if TYPE_CHECKING:
     from lm_mcp.client import LogicMonitorClient
+
+# Hard cap on alerts pulled for one windowed analysis.
+MAX_ALERTS_PER_WINDOW = 5000
+ALERTS_PAGE_SIZE = 1000
+
+# Warning a windowed analysis carries when the cap cut its window short.
+ALERT_WINDOW_TRUNCATED_WARNING = (
+    f"Truncated at {MAX_ALERTS_PER_WINDOW} alerts. "
+    "Narrow the window or scope for complete analysis."
+)
+
+
+async def paginate_alerts(
+    client: LogicMonitorClient,
+    filter_str: str,
+    cap: int = MAX_ALERTS_PER_WINDOW,
+    path: str = "/alert/alerts",
+) -> tuple[list[dict], bool, int | None]:
+    """Pull the alerts matching a filter across pages, up to a cap.
+
+    The cap is clamped to MAX_ALERTS_PER_WINDOW. While rows remain past a
+    page the API reports a negative total, a lower bound, so the API total is
+    known only when the last page read reported an exact one.
+
+    Args:
+        client: LogicMonitor API client.
+        filter_str: Filter string for the alert list.
+        cap: Most alerts to collect.
+        path: Alert list to read; /device/devices/{id}/alerts scopes it to
+            one device, which the /alert/alerts filters cannot do by id.
+
+    Returns:
+        The alerts, whether the cap stopped collection while more matched,
+        and the API's exact total, or None when it reported only a lower bound.
+    """
+    cap = min(cap, MAX_ALERTS_PER_WINDOW)
+    collected: list[dict] = []
+    more = False
+    api_total: int | None = None
+    while len(collected) < cap:
+        offset = len(collected)
+        params: dict = {
+            "size": min(ALERTS_PAGE_SIZE, cap - offset),
+            "offset": offset,
+            "filter": filter_str,
+        }
+        result = await client.get(path, params=params)
+        items = result.get("items", [])
+        raw_total = result.get("total", 0)
+        api_total = raw_total if raw_total >= 0 else None
+        collected.extend(items)
+        more = bool(items) and (raw_total < 0 or offset + len(items) < raw_total)
+        if not more:
+            break
+    return collected[:cap], more or len(collected) > cap, api_total
 
 
 def _normalize_alert_id(alert_id: str) -> str:
@@ -152,14 +208,8 @@ async def get_alerts(
                 }
             )
 
-        total = safe_total(result)
-        has_more = (offset + len(alerts)) < total
-
         response = {
-            "total": total,
-            "count": len(alerts),
-            "offset": offset,
-            "has_more": has_more,
+            **paginated_response(alerts, result, offset),
             "alerts": alerts,
         }
 

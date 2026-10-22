@@ -10,7 +10,7 @@ from typing import TYPE_CHECKING, Any
 
 from mcp.types import TextContent
 
-from lm_mcp.exceptions import LMError
+from lm_mcp.exceptions import LMError, NotFoundError
 from lm_mcp.tools import (
     SEVERITY_MAP,
     call_sub_tool,
@@ -20,6 +20,7 @@ from lm_mcp.tools import (
     resolve_group_filter,
     sanitize_filter_value,
 )
+from lm_mcp.tools.alerts import paginate_alerts
 from lm_mcp.tools.stats_helpers import (
     fetch_metric_series,
     shannon_entropy,
@@ -48,13 +49,15 @@ async def score_alert_noise(
         group_id: Optional device group ID filter.
 
     Returns:
-        Noise score with entropy, flapping alerts, and recommendations.
+        Noise score with entropy, flapping alerts, and recommendations;
+        truncated says whether the 5000-alert cap cut the window short and
+        api_total is the API's count, null when it reported only a lower bound.
     """
     try:
         now_epoch = int(time.time())
         start_epoch = now_epoch - (hours_back * 3600)
 
-        # Fetch all alerts (active + cleared) in the time window
+        # Fetch the window's alerts; with no cleared filter the list holds active alerts only
         filters = [f"startEpoch>:{start_epoch}"]
         if device:
             clean_val, _ = sanitize_filter_value(device)
@@ -62,13 +65,7 @@ async def score_alert_noise(
         if group_id is not None:
             filters.append(await resolve_group_filter(client, group_id))
 
-        params: dict[str, Any] = {
-            "size": 1000,
-            "filter": ",".join(filters),
-        }
-
-        result = await client.get("/alert/alerts", params=params)
-        alerts = result.get("items", [])
+        alerts, truncated, api_total = await paginate_alerts(client, ",".join(filters))
 
         if not alerts:
             return format_response(
@@ -76,6 +73,8 @@ async def score_alert_noise(
                     "noise_score": 0,
                     "entropy": 0.0,
                     "total_alerts": 0,
+                    "truncated": truncated,
+                    "api_total": api_total,
                     "flapping_alerts": [],
                     "top_noisy_devices": [],
                     "top_noisy_datasources": [],
@@ -183,6 +182,8 @@ async def score_alert_noise(
             "entropy": round(entropy, 4),
             "normalized_entropy": round(normalized_entropy, 4),
             "total_alerts": len(alerts),
+            "truncated": truncated,
+            "api_total": api_total,
             "flap_count": flap_count,
             "flapping_alerts": flapping_alerts,
             "repeat_ratio": round(repeat_ratio, 4),
@@ -210,7 +211,8 @@ async def calculate_availability(
 ) -> list[TextContent]:
     """Calculate availability percentage from alert history.
 
-    Fetches cleared and active alerts at or above the severity threshold,
+    Fetches active alerts at or above the severity threshold (the alert list
+    returns cleared alerts only under a cleared:true filter),
     computes downtime windows, merges overlapping incidents, and calculates
     SLA-style availability metrics.
 
@@ -218,18 +220,46 @@ async def calculate_availability(
         client: LogicMonitor API client.
         device_id: Optional device ID filter.
         device_name: Optional device display name filter.
-        group_id: Optional device group ID filter.
+        group_id: Optional device group ID filter; not with a device.
         hours_back: Hours to look back (default: 720 = 30 days).
         severity_threshold: Minimum severity to count as downtime
             (critical, error, warning, info). Default: error.
 
     Returns:
-        Availability percentage, downtime, MTTR, and per-device breakdown.
+        Availability percentage, downtime, MTTR, and per-device breakdown;
+        a device that does not resolve is an error, never 100 percent.
     """
     try:
         now_epoch = int(time.time())
         start_epoch = now_epoch - (hours_back * 3600)
         total_window_minutes = hours_back * 60
+
+        # A device's alert list ignores group filters, so a device and a group
+        # together have no single scope to read.
+        if group_id is not None and (device_id is not None or device_name is not None):
+            return format_response(
+                {
+                    "error": True,
+                    "code": "INVALID_PARAMETER",
+                    "message": (
+                        "Pass a device (device_id or device_name) or group_id, not both: "
+                        "a device's alert list cannot be filtered by group."
+                    ),
+                    "suggestion": (
+                        "Drop group_id for the device's availability, "
+                        "or drop the device for the group's."
+                    ),
+                }
+            )
+
+        # Resolve the device before reading any alert. A device that does not
+        # exist is an error, not a clean 100 percent, and a failed lookup must
+        # not fall through to availability for an unfiltered alert set.
+        device: dict | None = None
+        if device_id is not None or device_name is not None:
+            device = await _resolve_device(client, device_id, device_name)
+            if device.get("error"):
+                return format_response(device)
 
         # Build filter for alerts at or above severity threshold
         min_severity = SEVERITY_MAP.get(severity_threshold.lower(), 3)
@@ -240,48 +270,21 @@ async def calculate_availability(
         else:
             filters.append(f"severity:{min_severity}")
 
-        if device_id is not None:
-            filters.append(f"monitorObjectId:{device_id}")
         if group_id is not None:
             filters.append(await resolve_group_filter(client, group_id))
 
-        params: dict[str, Any] = {
-            "size": 1000,
-            "filter": ",".join(filters),
-        }
+        # The /alert/alerts filters ignore a device id, so a resolved device
+        # reads its own alert list, which keeps alerts recorded under an
+        # earlier display name.
+        alert_path = "/alert/alerts" if device is None else f"/device/devices/{device['id']}/alerts"
+        alerts, truncated, api_total = await paginate_alerts(
+            client, ",".join(filters), path=alert_path
+        )
 
-        result = await client.get("/alert/alerts", params=params)
-        alerts = result.get("items", [])
-
-        # Post-filter: ensure alerts match the requested device. A failed
-        # device lookup must propagate -- otherwise the function would
-        # silently return availability numbers for an unfiltered alert set
-        # (or for a different device) when the caller's device_id is
-        # missing/forbidden. The original ``except: pass`` masked the
-        # NotFoundError/PermissionError as wrong-math.
-        if device_id is not None:
-            try:
-                device_info = await client.get(f"/device/devices/{device_id}")
-            except LMError as exc:
-                return format_response(
-                    {
-                        "error": True,
-                        "code": "DEVICE_LOOKUP_FAILED",
-                        "message": (
-                            f"Could not look up device {device_id}: {exc}. "
-                            "Availability cannot be computed without confirming the device."
-                        ),
-                        "suggestion": (
-                            "Verify the device_id exists and the API token has read access."
-                        ),
-                    }
-                )
-            target_name = device_info.get("displayName", "")
-            if target_name:
-                alerts = [a for a in alerts if a.get("monitorObjectName") == target_name]
-
-        if device_name is not None and device_id is None:
-            alerts = [a for a in alerts if a.get("monitorObjectName") == device_name]
+        scope: dict[str, Any] = {"truncated": truncated, "api_total": api_total}
+        if device is not None:
+            scope["device_resolved"] = True
+            scope["device_id"] = device["id"]
 
         if not alerts:
             return format_response(
@@ -295,13 +298,18 @@ async def calculate_availability(
                     "by_device": {},
                     "hours_back": hours_back,
                     "severity_threshold": severity_threshold,
+                    **scope,
                 }
             )
 
-        # Group alerts by device and compute downtime windows
+        # Group alerts by device and compute downtime windows; a resolved
+        # device's alerts all count under its current display name.
         device_alerts: dict[str, list[tuple[int, int]]] = defaultdict(list)
         for alert in alerts:
-            dev = alert.get("monitorObjectName", "unknown")
+            if device is not None:
+                dev = device.get("displayName") or str(device["id"])
+            else:
+                dev = alert.get("monitorObjectName", "unknown")
             alert_start = max(alert.get("startEpoch", 0), start_epoch)
             alert_end = alert.get("endEpoch", 0)
             if alert_end == 0:
@@ -377,10 +385,66 @@ async def calculate_availability(
                 "hours_back": hours_back,
                 "severity_threshold": severity_threshold,
                 "measurement_window_context": measurement_context,
+                **scope,
             }
         )
     except Exception as e:
         return handle_error(e)
+
+
+async def _resolve_device(
+    client: LogicMonitorClient,
+    device_id: int | None,
+    device_name: str | None,
+) -> dict:
+    """Resolve a device by id, or by exact display name, to its id and display name.
+
+    Args:
+        client: LogicMonitor API client.
+        device_id: Device ID; takes precedence over device_name.
+        device_name: Exact device display name.
+
+    Returns:
+        The device with id and displayName, or an error dict with code
+        DEVICE_NOT_FOUND or DEVICE_LOOKUP_FAILED.
+    """
+    target = f"device {device_id}" if device_id is not None else f"device named '{device_name}'"
+    try:
+        if device_id is not None:
+            found: dict | None = await client.get(f"/device/devices/{device_id}")
+        else:
+            result = await client.get(
+                "/device/devices",
+                params={
+                    "filter": f"displayName:{quote_filter_value(device_name or '')}",
+                    "fields": "id,displayName",
+                    "size": 1,
+                },
+            )
+            items = result.get("items", [])
+            found = items[0] if items else None
+    except NotFoundError:
+        found = None
+    except LMError as exc:
+        return {
+            "error": True,
+            "code": "DEVICE_LOOKUP_FAILED",
+            "message": (
+                f"Could not look up {target}: {exc}. "
+                "Availability cannot be computed without confirming the device."
+            ),
+            "suggestion": "Verify the device exists and the API token has read access.",
+        }
+    if not found:
+        return {
+            "error": True,
+            "code": "DEVICE_NOT_FOUND",
+            "message": f"{target.capitalize()} not found, so its availability is unknown.",
+            "suggestion": (
+                "Check the device_id, or pass the exact display name; get_devices lists both."
+            ),
+        }
+    return found
 
 
 def _merge_intervals(

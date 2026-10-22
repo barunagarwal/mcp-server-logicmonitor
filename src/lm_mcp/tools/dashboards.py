@@ -13,6 +13,7 @@ from lm_mcp.tools import (
     WILDCARD_STRIP_NOTE,
     format_response,
     handle_error,
+    paginated_response,
     portal_url,
     quote_filter_value,
     require_write_permission,
@@ -171,14 +172,8 @@ async def get_dashboards(
                 }
             )
 
-        total = result.get("total", 0)
-        has_more = (offset + len(dashboards)) < total
-
         response = {
-            "total": total,
-            "count": len(dashboards),
-            "offset": offset,
-            "has_more": has_more,
+            **paginated_response(dashboards, result, offset),
             "dashboards": dashboards,
         }
         if wildcards_stripped:

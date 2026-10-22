@@ -11,10 +11,10 @@ from lm_mcp.tools import (
     WILDCARD_STRIP_NOTE,
     format_response,
     handle_error,
+    paginated_response,
     portal_url,
     quote_filter_value,
     require_write_permission,
-    safe_total,
     sanitize_filter_value,
 )
 
@@ -101,14 +101,8 @@ async def get_devices(
                 }
             )
 
-        total = safe_total(result)
-        has_more = (offset + len(devices)) < total
-
         response = {
-            "total": total,
-            "count": len(devices),
-            "offset": offset,
-            "has_more": has_more,
+            **paginated_response(devices, result, offset),
             "devices": devices,
         }
 

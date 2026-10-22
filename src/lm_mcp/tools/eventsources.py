@@ -12,6 +12,7 @@ from lm_mcp.tools import (
     format_response,
     handle_error,
     normalize_definition_fields,
+    paginated_response,
     quote_filter_value,
     require_write_permission,
     sanitize_filter_value,
@@ -85,14 +86,8 @@ async def get_eventsources(
                 }
             )
 
-        total = result.get("total", 0)
-        has_more = (offset + len(sources)) < total
-
         response = {
-            "total": total,
-            "count": len(sources),
-            "offset": offset,
-            "has_more": has_more,
+            **paginated_response(sources, result, offset),
             "eventsources": sources,
         }
         if wildcards_stripped:

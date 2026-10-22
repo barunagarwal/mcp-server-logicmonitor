@@ -131,6 +131,42 @@ def safe_total(result: dict) -> int:
     return abs(result.get("total", 0))
 
 
+# Note added to a list response when the API total is a negative lower bound
+INEXACT_TOTAL_NOTE = (
+    "The API did not report an exact count; total is a lower bound and more "
+    "results exist past this page."
+)
+
+
+def paginated_response(items: list[Any], result: dict, offset: int) -> dict[str, Any]:
+    """Build the pagination fields of a list tool response.
+
+    The API reports a negative total, -(offset + size + 1), when more results
+    exist than it counted. That reads as has_more with total as the lower
+    bound and a total_note, never as the end of the list.
+
+    Args:
+        items: The items returned on this page.
+        result: The raw API response dict.
+        offset: The offset the page was requested at.
+
+    Returns:
+        Dict with total, count, offset and has_more, plus total_note when
+        the API total was negative.
+    """
+    total = safe_total(result)
+    inexact = result.get("total", 0) < 0
+    response: dict[str, Any] = {
+        "total": total,
+        "count": len(items),
+        "offset": offset,
+        "has_more": inexact or offset + len(items) < total,
+    }
+    if inexact:
+        response["total_note"] = INEXACT_TOTAL_NOTE
+    return response
+
+
 def quote_filter_value(value: str) -> str:
     """Wrap a string value in double quotes for LM API v3 filter compatibility.
 

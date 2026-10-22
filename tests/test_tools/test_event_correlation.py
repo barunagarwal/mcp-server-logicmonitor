@@ -10,6 +10,7 @@ import respx
 
 from lm_mcp.auth.bearer import BearerAuth
 from lm_mcp.client import LogicMonitorClient
+from tests.alert_pages import alert_pages
 
 
 @pytest.fixture
@@ -262,3 +263,40 @@ class TestCorrelateChanges:
 
         data = json.loads(result[0].text)
         assert data["total_changes"] == 1
+
+
+class TestCorrelateChangesPaging:
+    """R4.2: correlate_changes reads the whole alert window or says the cap cut it short."""
+
+    @staticmethod
+    def _alerts(n):
+        start = int(time.time()) - 3600
+        return [{"id": f"LMA{i}", "startEpoch": start + i % 3000} for i in range(n)]
+
+    @respx.mock
+    async def test_sees_every_page(self, client):
+        from lm_mcp.tools.event_correlation import correlate_changes
+
+        respx.get(ALERT_URL).mock(side_effect=alert_pages(self._alerts(2500), lower_bound=True))
+        respx.get(AUDIT_URL).mock(return_value=httpx.Response(200, json={"items": [], "total": 0}))
+
+        result = await correlate_changes(client)
+
+        data = json.loads(result[0].text)
+        assert data["total_alerts"] == 2500
+        assert data["truncated"] is False
+        assert data["api_total"] == 2500
+
+    @respx.mock
+    async def test_capped_window_is_declared(self, client):
+        from lm_mcp.tools.event_correlation import correlate_changes
+
+        respx.get(ALERT_URL).mock(side_effect=alert_pages(self._alerts(6000), lower_bound=True))
+        respx.get(AUDIT_URL).mock(return_value=httpx.Response(200, json={"items": [], "total": 0}))
+
+        result = await correlate_changes(client)
+
+        data = json.loads(result[0].text)
+        assert data["total_alerts"] == 5000
+        assert data["truncated"] is True
+        assert data["api_total"] is None

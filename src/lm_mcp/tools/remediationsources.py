@@ -13,9 +13,9 @@ from lm_mcp.tools import (
     format_response,
     handle_error,
     normalize_definition_fields,
+    paginated_response,
     quote_filter_value,
     require_write_permission,
-    safe_total,
     sanitize_filter_value,
 )
 from lm_mcp.tools.diagnostic_remediation import run_pre_execution_checks
@@ -88,14 +88,8 @@ async def get_remediationsources(
                 }
             )
 
-        total = safe_total(result)
-        has_more = (offset + len(sources)) < total
-
         response = {
-            "total": total,
-            "count": len(sources),
-            "offset": offset,
-            "has_more": has_more,
+            **paginated_response(sources, result, offset),
             "remediationsources": sources,
         }
         if wildcards_stripped:
