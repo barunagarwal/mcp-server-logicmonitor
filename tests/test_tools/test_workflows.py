@@ -1240,28 +1240,40 @@ class TestSiteOutageHelpers:
 
         assert _collector_ids_from_devices([{"id": 1}]) == []
 
-    def test_dead_devices_counts_status_1_and_2(self):
-        """Both hostStatus=1 (dead) and hostStatus=2 (dead-collector) count."""
+    def test_dead_devices_counts_dead_and_dead_collector(self):
+        """R6.1: both hostStatus "dead" and "dead-collector" count."""
         from lm_mcp.tools.workflows import _count_dead_devices
 
         devices = [
-            {"id": 1, "status": 0},  # normal
-            {"id": 2, "status": 1},  # dead
-            {"id": 3, "status": 2},  # dead-collector
-            {"id": 4, "status": 3},  # unmonitored, not counted
+            {"id": 1, "status": "normal"},
+            {"id": 2, "status": "dead"},
+            {"id": 3, "status": "dead-collector"},
+            {"id": 4, "status": "unmonitored"},  # not counted
         ]
         assert _count_dead_devices(devices) == 2
 
     def test_dead_devices_accepts_raw_host_status_field(self):
-        """Raw LM API shape uses `hostStatus` not `status`."""
+        """R6.1: raw LM API shape uses `hostStatus` not `status`."""
+        from lm_mcp.tools.workflows import _count_dead_devices
+
+        devices = [
+            {"id": 1, "hostStatus": "dead"},
+            {"id": 2, "hostStatus": "dead-collector"},
+            {"id": 3, "hostStatus": "normal"},
+        ]
+        assert _count_dead_devices(devices) == 2
+
+    def test_dead_devices_ignores_numeric_host_status(self):
+        """R6.1: the v3 API reports hostStatus as a word, so a number is not a dead device."""
         from lm_mcp.tools.workflows import _count_dead_devices
 
         devices = [
             {"id": 1, "hostStatus": 1},
             {"id": 2, "hostStatus": 2},
-            {"id": 3, "hostStatus": 0},
+            {"id": 3, "status": "1"},
+            {"id": 4, "status": "2"},
         ]
-        assert _count_dead_devices(devices) == 2
+        assert _count_dead_devices(devices) == 0
 
     def test_dead_devices_falls_back_to_alert_status(self):
         """When hostStatus absent, alertStatus strings still flag dead devices."""
@@ -1304,7 +1316,9 @@ class TestDetectSiteOutage:
         """
         from lm_mcp.tools.workflows import detect_site_outage
 
-        devices_data = {"devices": [{"id": i, "status": 1, "collector_id": 1} for i in range(10)]}
+        devices_data = {
+            "devices": [{"id": i, "status": "dead", "collector_id": 1} for i in range(10)]
+        }
         collector_data = {
             "total_collectors": 1,
             "collectors_down": 1,
@@ -1342,7 +1356,7 @@ class TestDetectSiteOutage:
         """Clean state → verdict = no_outage_signature."""
         from lm_mcp.tools.workflows import detect_site_outage
 
-        devices_data = {"devices": [{"id": 1, "status": 0, "collector_id": 1}]}
+        devices_data = {"devices": [{"id": 1, "status": "normal", "collector_id": 1}]}
         collector_data = {
             "total_collectors": 1,
             "collectors_down": 0,
@@ -1367,7 +1381,7 @@ class TestDetectSiteOutage:
         """Burst + power (no collector down) → 50 confidence → possible_site_outage."""
         from lm_mcp.tools.workflows import detect_site_outage
 
-        devices_data = {"devices": [{"id": 1, "status": 0, "collector_id": 1}]}
+        devices_data = {"devices": [{"id": 1, "status": "normal", "collector_id": 1}]}
         collector_data = {
             "total_collectors": 1,
             "collectors_down": 0,
@@ -1392,7 +1406,7 @@ class TestDetectSiteOutage:
         """Failure in one sub-tool is captured as warning, composite continues."""
         from lm_mcp.tools.workflows import detect_site_outage
 
-        devices_data = {"devices": [{"id": 1, "status": 1, "collector_id": 1}]}
+        devices_data = {"devices": [{"id": 1, "status": "dead", "collector_id": 1}]}
 
         async def failing_mock(*args, **kwargs):
             raise RuntimeError("sub-tool exploded")
@@ -1436,9 +1450,9 @@ class TestDetectSiteOutage:
 
         devices_data = {
             "devices": [
-                {"id": 1, "status": 1, "collector_id": 10},
-                {"id": 2, "status": 1, "collector_id": 20},
-                {"id": 3, "status": 1, "collector_id": 30},
+                {"id": 1, "status": "dead", "collector_id": 10},
+                {"id": 2, "status": "dead", "collector_id": 20},
+                {"id": 3, "status": "dead", "collector_id": 30},
             ]
         }
 

@@ -220,6 +220,61 @@ class TestPersistenceIntegration:
         finally:
             os.unlink(path)
 
+    @pytest.fixture
+    def _no_backends(self, monkeypatch):
+        """Leave every optional backend unconfigured so bootstrap builds none."""
+        from lm_mcp.terraform_config import reset_terraform_config
+
+        for var in ("AWX_URL", "AWX_TOKEN", "WATSONX_API_KEY", "TF_WORKSPACE_DIR"):
+            monkeypatch.delenv(var, raising=False)
+        monkeypatch.setattr("lm_mcp.hf_config.get_hf_config", lambda: None)
+        monkeypatch.setenv("LM_PORTAL", "test.logicmonitor.com")
+        monkeypatch.setenv("LM_BEARER_TOKEN", "test-token")
+        reset_terraform_config()
+        yield
+        reset_terraform_config()
+
+    @pytest.mark.usefixtures("_no_backends")
+    async def test_transport_bootstrap_wires_the_configured_path(self, monkeypatch, tmp_path):
+        """R4.6: startup with LM_SESSION_PERSIST_PATH set persists a variable set via the server."""
+        from lm_mcp.config import get_config
+        from lm_mcp.server import execute_tool
+        from lm_mcp.session import get_persistence_path
+        from lm_mcp.transport.bootstrap import bootstrap_backends
+
+        path = tmp_path / "session.json"
+        monkeypatch.setenv("LM_SESSION_PERSIST_PATH", str(path))
+
+        backends = bootstrap_backends(get_config())
+        try:
+            result = await execute_tool(
+                "set_session_variable", {"name": "region", "value": "us-west"}
+            )
+        finally:
+            await backends.close()
+
+        assert not getattr(result[0], "isError", False)
+        assert get_persistence_path() == str(path)
+        assert json.loads(path.read_text()) == {"region": "us-west"}
+
+    @pytest.mark.usefixtures("_no_backends")
+    async def test_transport_bootstrap_loads_variables_from_a_previous_run(
+        self, monkeypatch, tmp_path
+    ):
+        """R4.6: a restarted server reads back the variables the last run persisted."""
+        from lm_mcp.config import get_config
+        from lm_mcp.transport.bootstrap import bootstrap_backends
+
+        path = tmp_path / "session.json"
+        path.write_text(json.dumps({"region": "us-west"}))
+        monkeypatch.setenv("LM_SESSION_PERSIST_PATH", str(path))
+        set_session(None)
+
+        backends = bootstrap_backends(get_config())
+        await backends.close()
+
+        assert get_session().get_variable("region") == "us-west"
+
     def test_persistence_disabled_by_default(self):
         """Without configuring a path, no persistence occurs."""
         session = get_session()

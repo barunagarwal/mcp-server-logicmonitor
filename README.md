@@ -405,6 +405,7 @@ documented at the top of the file.
 | `LM_MCP_CATEGORIES` | No | - | Comma-separated category names to include: `read`, `write`, `delete`, `export`, `import`, `session`, `workflow`. Composes by intersection with `LM_ENABLED_TOOLS`/`LM_DISABLED_TOOLS` -- only narrows, never expands. Useful for clients with tool-count limits (e.g., Cursor's 40-tool cap). |
 | `LM_HEALTH_CHECK_CONNECTIVITY` | No | `false` | Include an LM API ping in `/health` for authenticated callers (never in `/readyz`) |
 | `LM_SESSION_PERSIST_PATH` | No | - | File path for persistent session variables (survives restarts) |
+| `LM_ANALYSIS_MAX_CONCURRENCY` | No | `4` | Analysis workflows (`/api/v1/analyze` and the alert webhook) that run at once; later submissions are accepted and wait as `pending`. At least 1. HTTP transport only. |
 | `AWX_URL` | No | - | Ansible Automation Platform controller URL (e.g., `https://aap.example.com`) |
 | `AWX_TOKEN` | No | - | AAP personal access token |
 | `AWX_VERIFY_SSL` | No | `true` | Verify SSL certificates for AAP connections |
@@ -579,7 +580,7 @@ Once configured, ask your assistant in natural language. A representative sample
 - "What's the blast radius if device 789 goes down?"
 - "What diagnostics ran on device 123 today, and what did the scripts output?"
 
-For power users, the server accepts LogicMonitor filter syntax directly, for example "Get devices where filter is 'displayName~prod,hostStatus:alive'".
+For power users, the server accepts LogicMonitor filter syntax directly, for example "Get devices where filter is 'displayName~"prod",hostStatus:"normal"'". String values, `hostStatus` words included, are quoted.
 
 ## Development
 

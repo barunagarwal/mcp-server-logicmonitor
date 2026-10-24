@@ -333,7 +333,7 @@ def enable_writes(monkeypatch):
 BASE_URL = "https://test.logicmonitor.com/santaba/rest"
 
 
-def _mock_execute_prechecks(host_status=0, build="39.300"):
+def _mock_execute_prechecks(host_status="normal", build="39.300"):
     """Stub the shared pre-execution check endpoints for execute_diagnostic."""
     respx.get(f"{BASE_URL}/device/devices/1786").mock(
         return_value=httpx.Response(

@@ -1754,10 +1754,10 @@ async def detect_site_outage(
 def _count_dead_devices(devices: list[dict]) -> int:
     """Count devices in dead or dead-collector status.
 
-    LM hostStatus codes: 0=normal, 1=dead, 2=dead-collector, 3=unmonitored,
-    4=disabled. Both 1 and 2 count as dead because the device is not
-    reporting metrics in either case. The formatted `get_devices` response
-    surfaces hostStatus as `status`; the raw API item keeps `hostStatus`.
+    The v3 API reports hostStatus as a word: normal, dead, dead-collector,
+    unmonitored or disabled. Both dead and dead-collector count because the
+    device is not reporting metrics in either case. The formatted `get_devices`
+    response surfaces hostStatus as `status`; the raw API item keeps `hostStatus`.
     """
     count = 0
     for dev in devices:
@@ -1765,7 +1765,7 @@ def _count_dead_devices(devices: list[dict]) -> int:
         if status is None:
             status = dev.get("status")
         alert_status = (dev.get("alertStatus") or "").lower()
-        if status in (1, 2, "1", "2", "dead", "dead-collector") or alert_status in (
+        if status in ("dead", "dead-collector") or alert_status in (
             "dead",
             "dead-collector",
             "unreachable",

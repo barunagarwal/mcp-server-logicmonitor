@@ -148,7 +148,7 @@ class TestGetTraceService:
                     "displayName": "order-service",
                     "name": "order-service",
                     "deviceType": 6,
-                    "hostStatus": 0,
+                    "hostStatus": "normal",
                 },
             )
         )

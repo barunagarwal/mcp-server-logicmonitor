@@ -150,6 +150,10 @@ class LMConfig(BaseSettings):
     # Session settings
     session_enabled: bool = True
     session_history_size: int = 50
+    session_persist_path: str | None = None
+
+    # Analysis workflows (HTTP transport) running at once; later submissions queue
+    analysis_max_concurrency: int = 4
 
     # Validation settings
     field_validation: Literal["off", "warn", "error"] = "warn"
@@ -254,6 +258,14 @@ class LMConfig(BaseSettings):
             raise ValueError("session_history_size must be non-negative")
         if v > 1000:
             raise ValueError("session_history_size must not exceed 1000")
+        return v
+
+    @field_validator("analysis_max_concurrency", mode="after")
+    @classmethod
+    def validate_analysis_max_concurrency(cls, v: int) -> int:
+        """Validate at least one analysis workflow can run."""
+        if v < 1:
+            raise ValueError("analysis_max_concurrency must be at least 1")
         return v
 
     @model_validator(mode="after")

@@ -373,7 +373,7 @@ class TestExecuteRemediation:
         respx.get("https://test.logicmonitor.com/santaba/rest/device/devices/1").mock(
             return_value=httpx.Response(
                 200,
-                json={"id": 1, "hostStatus": 0, "preferredCollectorId": 10},
+                json={"id": 1, "hostStatus": "normal", "preferredCollectorId": 10},
             )
         )
         respx.get(
@@ -397,7 +397,7 @@ class TestExecuteRemediation:
         respx.get("https://test.logicmonitor.com/santaba/rest/device/devices/1").mock(
             return_value=httpx.Response(
                 200,
-                json={"id": 1, "hostStatus": 0, "preferredCollectorId": 10},
+                json={"id": 1, "hostStatus": "normal", "preferredCollectorId": 10},
             )
         )
         respx.get(
@@ -442,7 +442,7 @@ class TestExecuteRemediation:
         respx.get("https://test.logicmonitor.com/santaba/rest/device/devices/1").mock(
             return_value=httpx.Response(
                 200,
-                json={"id": 1, "hostStatus": 0, "preferredCollectorId": 10},
+                json={"id": 1, "hostStatus": "normal", "preferredCollectorId": 10},
             )
         )
         respx.get(
@@ -490,7 +490,7 @@ class TestExecuteRemediation:
         respx.get("https://test.logicmonitor.com/santaba/rest/device/devices/1").mock(
             return_value=httpx.Response(
                 200,
-                json={"id": 1, "hostStatus": 0, "preferredCollectorId": 10},
+                json={"id": 1, "hostStatus": "normal", "preferredCollectorId": 10},
             )
         )
         respx.get(

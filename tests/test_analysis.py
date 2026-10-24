@@ -108,13 +108,15 @@ class TestAnalysisStore:
         assert fetched.error == "Something broke"
 
     def test_cleanup_expired_removes_old_entries(self):
-        """cleanup_expired() removes entries past TTL."""
+        """cleanup_expired() removes finished entries past TTL."""
         from lm_mcp.analysis import AnalysisStore
 
         store = AnalysisStore(ttl_minutes=0)
         req = store.create("test", {})
-        # Force created_at to the past
-        req.created_at = time.time() - 120
+        store.update(req.id, status="completed", result={})
+        # Force the run's timestamps to the past
+        req.created_at = time.time() - 180
+        req.completed_at = time.time() - 120
         store.cleanup_expired()
         assert store.get(req.id) is None
 
@@ -137,6 +139,70 @@ class TestAnalysisStore:
         recent = store.list_recent(limit=10)
         assert len(recent) == 2
         assert recent[0].id == r2.id  # Most recent first
+
+    def test_create_evicts_expired_entries(self):
+        """R4.6: a create after the TTL drops the expired entries, so the store stays bounded."""
+        from lm_mcp.analysis import AnalysisStore
+
+        store = AnalysisStore(ttl_minutes=60)
+        old = [store.create("health_check", {}) for _ in range(3)]
+        for req in old:
+            store.update(req.id, status="completed", result={})
+            req.created_at = time.time() - 3700
+            req.completed_at = time.time() - 3601
+
+        fresh = store.create("health_check", {})
+
+        assert all(store.get(req.id) is None for req in old)
+        assert store.get(fresh.id) is fresh
+        assert len(store.list_recent(limit=100)) == 1
+
+    def test_update_evicts_expired_entries(self):
+        """R4.6: an update after the TTL drops the expired entries and still applies."""
+        from lm_mcp.analysis import AnalysisStore
+
+        store = AnalysisStore(ttl_minutes=60)
+        old = store.create("health_check", {})
+        current = store.create("health_check", {})
+        store.update(old.id, status="failed", error="boom")
+        old.created_at = time.time() - 3700
+        old.completed_at = time.time() - 3601
+
+        store.update(current.id, status="running")
+
+        assert store.get(old.id) is None
+        assert store.get(current.id).status == "running"
+        assert len(store.list_recent(limit=100)) == 1
+
+    def test_in_flight_entries_outlive_the_ttl(self):
+        """R4.6: a pending or running analysis older than the TTL keeps its entry and result."""
+        from lm_mcp.analysis import AnalysisStore
+
+        store = AnalysisStore(ttl_minutes=60)
+        queued = store.create("health_check", {})
+        running = store.create("health_check", {})
+        store.update(running.id, status="running")
+        queued.created_at = running.created_at = time.time() - 3601
+
+        store.create("health_check", {})
+        store.update(running.id, status="completed", result={"alerts": []})
+
+        assert store.get(queued.id).status == "pending"
+        assert store.get(running.id).status == "completed"
+        assert store.get(running.id).result == {"alerts": []}
+
+    def test_ttl_counts_from_completion(self):
+        """R4.6: a finished analysis stays readable for the TTL after it completed."""
+        from lm_mcp.analysis import AnalysisStore
+
+        store = AnalysisStore(ttl_minutes=60)
+        req = store.create("health_check", {})
+        store.update(req.id, status="completed", result={})
+        req.created_at = time.time() - 7200
+
+        store.create("health_check", {})
+
+        assert store.get(req.id) is req
 
 
 class TestWorkflowDispatch:

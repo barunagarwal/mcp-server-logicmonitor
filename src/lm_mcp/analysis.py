@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import time
 import uuid
@@ -65,11 +66,17 @@ class AnalysisRequest:
 
 
 class AnalysisStore:
-    """In-memory store for analysis requests with TTL expiration."""
+    """In-memory store for analysis requests with TTL expiration.
 
-    def __init__(self, ttl_minutes: int = 60) -> None:
+    Every create and update evicts the finished entries that completed more than
+    the TTL ago; pending and running entries stay until they finish. At most
+    max_concurrency workflows run at once; later ones wait as pending.
+    """
+
+    def __init__(self, ttl_minutes: int = 60, max_concurrency: int = 4) -> None:
         self._store: dict[str, AnalysisRequest] = {}
         self._ttl_seconds = ttl_minutes * 60
+        self._run_slots = asyncio.Semaphore(max_concurrency)
 
     def create(self, workflow: str, arguments: dict[str, Any]) -> AnalysisRequest:
         """Create a new analysis request.
@@ -81,6 +88,7 @@ class AnalysisStore:
         Returns:
             The created AnalysisRequest.
         """
+        self.cleanup_expired()
         analysis_id = str(uuid.uuid4())
         req = AnalysisRequest(
             id=analysis_id,
@@ -116,6 +124,7 @@ class AnalysisStore:
             result: Analysis result data.
             error: Error message.
         """
+        self.cleanup_expired()
         req = self._store.get(analysis_id)
         if req is None:
             return
@@ -130,14 +139,16 @@ class AnalysisStore:
             req.completed_at = time.time()
 
     def cleanup_expired(self) -> int:
-        """Remove expired entries past TTL.
+        """Remove finished entries whose completion is past the TTL.
 
         Returns:
             Number of entries removed.
         """
         now = time.time()
         expired = [
-            aid for aid, req in self._store.items() if (now - req.created_at) > self._ttl_seconds
+            aid
+            for aid, req in self._store.items()
+            if req.completed_at is not None and (now - req.completed_at) > self._ttl_seconds
         ]
         for aid in expired:
             del self._store[aid]
@@ -163,26 +174,28 @@ class AnalysisStore:
 async def run_analysis(store: AnalysisStore, analysis_id: str) -> None:
     """Execute an analysis workflow asynchronously.
 
-    Updates the store with running/completed/failed status.
+    Waits as pending for one of the store's run slots, then updates the store
+    with running/completed/failed status.
 
     Args:
         store: The analysis store.
         analysis_id: The analysis request ID to execute.
     """
-    req = store.get(analysis_id)
-    if req is None:
-        return
+    async with store._run_slots:
+        req = store.get(analysis_id)
+        if req is None:
+            return
 
-    store.update(analysis_id, status="running")
+        store.update(analysis_id, status="running")
 
-    try:
-        from lm_mcp.server import execute_tool
+        try:
+            from lm_mcp.server import execute_tool
 
-        result = await _dispatch_workflow(req.workflow, req.arguments, execute_tool)
-        store.update(analysis_id, status="completed", result=result)
-    except Exception as e:
-        logger.exception("Analysis %s failed", analysis_id)
-        store.update(analysis_id, status="failed", error=str(e))
+            result = await _dispatch_workflow(req.workflow, req.arguments, execute_tool)
+            store.update(analysis_id, status="completed", result=result)
+        except Exception as e:
+            logger.exception("Analysis %s failed", analysis_id)
+            store.update(analysis_id, status="failed", error=str(e))
 
 
 async def _dispatch_workflow(

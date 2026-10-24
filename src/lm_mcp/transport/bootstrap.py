@@ -1,5 +1,5 @@
 # Description: Optional-backend setup shared by the stdio and HTTP transports.
-# Description: Builds and registers the AWX, watsonx or HuggingFace, and Terraform clients.
+# Description: Builds the AWX, watsonx/HuggingFace and Terraform clients; sets session persistence.
 
 from __future__ import annotations
 
@@ -41,7 +41,9 @@ def bootstrap_backends(config: LMConfig) -> Backends:
     Each backend is absent unless its configuration loads: AWX needs AWX_URL and
     AWX_TOKEN, watsonx needs WATSONX_API_KEY, the HuggingFace fallback stands in
     when watsonx is not configured and torch is installed, and Terraform needs
-    TF_WORKSPACE_DIR outside multi-portal mode.
+    TF_WORKSPACE_DIR outside multi-portal mode. Session variables persist to
+    LM_SESSION_PERSIST_PATH when it is set; the path is set here, before the
+    transport first creates the session, which loads the file.
 
     Args:
         config: The LogicMonitor server configuration.
@@ -50,6 +52,9 @@ def bootstrap_backends(config: LMConfig) -> Backends:
         The backends built, for the transport to close at shutdown.
     """
     from lm_mcp.server import _set_awx_client, _set_tf_runner, _set_watsonx_client
+    from lm_mcp.session import set_persistence_path
+
+    set_persistence_path(config.session_persist_path)
 
     backends = Backends()
 

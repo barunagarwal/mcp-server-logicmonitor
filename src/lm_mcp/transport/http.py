@@ -354,7 +354,7 @@ def create_asgi_app() -> Starlette:
     # Analysis store (shared across requests within the ASGI app)
     from lm_mcp.analysis import AnalysisStore, run_analysis, validate_workflow
 
-    analysis_store = AnalysisStore(ttl_minutes=60)
+    analysis_store = AnalysisStore(ttl_minutes=60, max_concurrency=config.analysis_max_concurrency)
     # Hold references to background tasks to prevent garbage collection (RUF006)
     _background_tasks: set[asyncio.Task] = set()  # type: ignore[type-arg]
 

@@ -44,7 +44,7 @@ class TestGetDevices:
                         {
                             "id": 1,
                             "displayName": "server01",
-                            "hostStatus": 1,
+                            "hostStatus": "dead",
                             "currentCollectorId": 5,
                         }
                     ],
@@ -238,7 +238,7 @@ class TestGetDevice:
                 json={
                     "id": 123,
                     "displayName": "server01",
-                    "hostStatus": 1,
+                    "hostStatus": "dead",
                     "systemProperties": [
                         {"name": "system.hostname", "value": "server01.example.com"}
                     ],

@@ -1112,7 +1112,7 @@ class TestCalculateAvailabilityDeviceLookup:
         )
         respx.get(DEVICE_URL_TEMPLATE.format(id=100)).mock(
             return_value=httpx.Response(
-                200, json={"id": 100, "displayName": "server1", "hostStatus": 0}
+                200, json={"id": 100, "displayName": "server1", "hostStatus": "normal"}
             )
         )
 

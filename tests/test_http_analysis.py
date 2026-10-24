@@ -94,6 +94,87 @@ class TestPostAnalyze:
         assert resp.status_code == 400
 
 
+class TestAnalysisConcurrency:
+    """R4.6: LM_ANALYSIS_MAX_CONCURRENCY bounds the workflows running at once; the rest queue."""
+
+    @pytest.fixture
+    def gated_tools(self, monkeypatch):
+        """Replace execute_tool with one that holds every call until the gate opens."""
+        import asyncio
+
+        from mcp.types import TextContent
+
+        state = {"in_flight": 0, "peak": 0, "gate": asyncio.Event()}
+
+        async def fake_execute_tool(name: str, arguments: dict) -> list[TextContent]:
+            state["in_flight"] += 1
+            state["peak"] = max(state["peak"], state["in_flight"])
+            try:
+                await state["gate"].wait()
+            finally:
+                state["in_flight"] -= 1
+            return [TextContent(type="text", text="{}")]
+
+        monkeypatch.setattr("lm_mcp.server.execute_tool", fake_execute_tool)
+        return state
+
+    @staticmethod
+    async def _settle() -> None:
+        import asyncio
+
+        for _ in range(50):
+            await asyncio.sleep(0)
+
+    async def test_limit_bounds_running_workflows_and_queues_the_rest(
+        self, _set_env, monkeypatch, gated_tools
+    ):
+        """With a limit of 2, three submissions run two workflows; a fourth is accepted, waits."""
+        from httpx import ASGITransport, AsyncClient
+
+        from lm_mcp.transport.http import create_asgi_app
+
+        monkeypatch.setenv("LM_ANALYSIS_MAX_CONCURRENCY", "2")
+        app = create_asgi_app()
+
+        async with AsyncClient(
+            transport=ASGITransport(app=app), base_url="http://localhost"
+        ) as client:
+
+            async def submit() -> str:
+                resp = await client.post(
+                    "/api/v1/analyze", json={"workflow": "health_check", "arguments": {}}
+                )
+                assert resp.status_code == 202
+                return resp.json()["analysis_id"]
+
+            async def statuses(ids: list[str]) -> list[str]:
+                return [
+                    (await client.get(f"/api/v1/analysis/{aid}")).json()["status"] for aid in ids
+                ]
+
+            ids = [await submit() for _ in range(3)]
+            await self._settle()
+
+            assert gated_tools["in_flight"] == 2
+            assert sorted(await statuses(ids)) == ["pending", "running", "running"]
+
+            ids.append(await submit())
+            await self._settle()
+
+            assert gated_tools["in_flight"] == 2
+            assert (await statuses(ids))[3] == "pending"
+
+            gated_tools["gate"].set()
+            for _ in range(20):
+                await self._settle()
+                if all(s == "completed" for s in await statuses(ids)):
+                    break
+
+            assert await statuses(ids) == ["completed"] * 4
+
+        assert gated_tools["peak"] == 2
+
+
 class TestGetAnalysis:
     """Tests for GET /api/v1/analysis/{id} endpoint."""
 

@@ -121,8 +121,8 @@ class TestDeviceQueries:
                 200,
                 json={
                     "items": [
-                        {"id": 100, "displayName": "prod-db-01", "hostStatus": 1},
-                        {"id": 101, "displayName": "prod-web-01", "hostStatus": 1},
+                        {"id": 100, "displayName": "prod-db-01", "hostStatus": "dead"},
+                        {"id": 101, "displayName": "prod-web-01", "hostStatus": "dead"},
                     ],
                     "total": 2,
                 },
@@ -136,7 +136,7 @@ class TestDeviceQueries:
                 json={
                     "id": 100,
                     "displayName": "prod-db-01",
-                    "hostStatus": 1,
+                    "hostStatus": "dead",
                     "systemProperties": [],
                 },
             )
