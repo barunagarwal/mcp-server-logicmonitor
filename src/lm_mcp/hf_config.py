@@ -5,6 +5,8 @@ from __future__ import annotations
 
 from pydantic_settings import BaseSettings
 
+from lm_mcp.config_warnings import log_unusable_config
+
 _cached_hf_config: HuggingFaceConfig | None = None
 
 
@@ -23,7 +25,8 @@ def get_hf_config() -> HuggingFaceConfig | None:
             return None
         try:
             _cached_hf_config = HuggingFaceConfig()
-        except Exception:
+        except Exception as exc:
+            log_unusable_config("HuggingFace fallback", HuggingFaceConfig, exc, gate=None)
             return None
     return _cached_hf_config
 

@@ -37,7 +37,7 @@ async def watsonx_summarize(
     try:
         parsed = json.loads(data) if isinstance(data, str) else data
         summary = await client.summarize(parsed, context=context, max_tokens=max_tokens)
-        return format_response({"summary": summary, "model": "ibm/granite-4-h-small"})
+        return format_response({"summary": summary, "model": client.llm_model_id})
     except Exception as e:
         return handle_error(e)
 

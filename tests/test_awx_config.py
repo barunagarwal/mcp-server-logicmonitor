@@ -49,3 +49,23 @@ class TestAwxConfig:
         c1 = get_awx_config()
         c2 = get_awx_config()
         assert c1 is c2
+
+    def test_unusable_verify_ssl_is_logged_by_name(self, monkeypatch, caplog):
+        """R4.5: AWX configured with an unreadable AWX_VERIFY_SSL logs it, then returns None."""
+        import logging
+
+        from lm_mcp.awx_config import get_awx_config, reset_awx_config
+
+        monkeypatch.setenv("AWX_URL", "https://controller.example.com")
+        monkeypatch.setenv("AWX_TOKEN", "mytoken123")
+        monkeypatch.setenv("AWX_VERIFY_SSL", "maybe")
+        reset_awx_config()
+
+        with caplog.at_level(logging.WARNING, logger="lm_mcp"):
+            assert get_awx_config() is None
+
+        (record,) = [r for r in caplog.records if r.levelno == logging.WARNING]
+        message = record.getMessage()
+        assert "AWX_VERIFY_SSL" in message
+        assert "maybe" not in message
+        assert "mytoken123" not in message

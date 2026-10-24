@@ -4,7 +4,7 @@
 import json
 import logging
 import math
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 
 import httpx
 import pytest
@@ -12,6 +12,7 @@ import respx
 
 from lm_mcp.auth.bearer import BearerAuth
 from lm_mcp.client import LogicMonitorClient
+from tests.watsonx_sdk import real_watsonx_client
 
 
 @pytest.fixture
@@ -378,21 +379,6 @@ class TestForecastMetricMethod:
         assert cpu["method_used"] == "linear"
 
 
-def _make_watsonx_client():
-    """Build a real WatsonxClient through its constructor with the SDK classes patched."""
-    with (
-        patch("ibm_watsonx_ai.Credentials", return_value=MagicMock()),
-        patch("ibm_watsonx_ai.APIClient", return_value=MagicMock()),
-    ):
-        from lm_mcp.client.watsonx import WatsonxClient
-
-        return WatsonxClient(
-            api_key="test-key",
-            url="https://us-south.ml.cloud.ibm.com",
-            project_id="proj-123",
-        )
-
-
 async def _forecast_cpu(client, values, method, threshold=1000.0):
     """Serve one cpu series and return its forecast entry."""
     from lm_mcp.tools.forecasting import forecast_metric
@@ -428,7 +414,7 @@ class TestForecastMethodLabels:
     @respx.mock
     async def test_ttm_under_512_points_falls_back_with_reason(self, client, monkeypatch):
         """method=ttm with watsonx but 100 points reports linear and the 512 minimum."""
-        wx = _make_watsonx_client()
+        wx = real_watsonx_client()
         wx._run_ttm_forecast = MagicMock()
         monkeypatch.setattr("lm_mcp.server._watsonx_client", wx)
         values = [[float(10 + i)] for i in range(100)]
@@ -444,7 +430,7 @@ class TestForecastMethodLabels:
         self, client, monkeypatch, caplog
     ):
         """A TTM call that raises reports linear, the failure, and a WARNING."""
-        wx = _make_watsonx_client()
+        wx = real_watsonx_client()
         wx._run_ttm_forecast = MagicMock(side_effect=Exception("connection timeout"))
         monkeypatch.setattr("lm_mcp.server._watsonx_client", wx)
         values = [[float(10 + i)] for i in range(600)]
@@ -467,7 +453,7 @@ class TestForecastMethodLabels:
         """A TTM forecast that succeeds reports ttm and no fallback reason."""
         from lm_mcp.client.watsonx import TTM_MODEL_ID
 
-        wx = _make_watsonx_client()
+        wx = real_watsonx_client()
         wx._run_ttm_forecast = MagicMock(
             return_value={
                 "forecast_values": [70.0, 71.0, 72.0],

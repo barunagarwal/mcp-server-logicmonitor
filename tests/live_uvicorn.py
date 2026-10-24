@@ -6,6 +6,15 @@ import contextlib
 import time
 
 
+def free_port(host: str) -> int:
+    """Ask the OS for a port that is free on ``host`` right now."""
+    import socket
+
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+        sock.bind((host, 0))
+        return sock.getsockname()[1]
+
+
 def live_uvicorn(monkeypatch):
     """Return a runner for real-socket tests: ``async with live(coro) as port``.
 

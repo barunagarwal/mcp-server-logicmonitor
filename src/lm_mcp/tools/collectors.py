@@ -308,13 +308,16 @@ async def _enrich_collector(
 
     active_collector_down = await _active_collector_down_count(client, hostname)
     down_signal_unavailable = active_collector_down is None
-    active_down = active_collector_down or 0
 
     history: list[dict] = []
     if include_history and hostname:
         history = await _collector_down_history(client, hostname, history_days)
 
-    is_down = bool(active_down) or _status_indicates_down(status)
+    # A failed CollectorDown read leaves the collector's state unknown; the status
+    # field is not consulted on its own.
+    is_down: bool | None = None
+    if not down_signal_unavailable:
+        is_down = bool(active_collector_down) or _status_indicates_down(status)
 
     record: dict = {
         "id": cid,
@@ -326,7 +329,7 @@ async def _enrich_collector(
         "is_down": is_down,
         "downstream_device_count": downstream_count,
         "reported_numberOfHosts": num_hosts_reported,
-        "active_collector_down_alerts": active_down,
+        "active_collector_down_alerts": active_collector_down,
         "up_time_seconds": col.get("upTime"),
     }
     if down_signal_unavailable:

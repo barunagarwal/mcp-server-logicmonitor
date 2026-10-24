@@ -5,6 +5,8 @@ from __future__ import annotations
 
 from pydantic_settings import BaseSettings
 
+from lm_mcp.config_warnings import log_unusable_config
+
 _cached_awx_config: AwxConfig | None = None
 
 
@@ -18,7 +20,8 @@ def get_awx_config() -> AwxConfig | None:
     if _cached_awx_config is None:
         try:
             _cached_awx_config = AwxConfig()
-        except Exception:
+        except Exception as exc:
+            log_unusable_config("AWX", AwxConfig, exc, gate="AWX_URL")
             return None
     return _cached_awx_config
 

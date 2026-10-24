@@ -5,7 +5,7 @@ import logging
 
 import pytest
 
-from tests.live_uvicorn import live_uvicorn
+from tests.live_uvicorn import free_port, live_uvicorn
 
 # 16 characters: the configured minimum, and below the length a secret scanner flags.
 TOKEN = "http-auth-tok-16"
@@ -353,15 +353,6 @@ def live_server(monkeypatch):
     return live_uvicorn(monkeypatch)
 
 
-def _free_port(host: str) -> int:
-    """Ask the OS for a port that is free on ``host`` right now."""
-    import socket
-
-    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
-        sock.bind((host, 0))
-        return sock.getsockname()[1]
-
-
 @pytest.fixture
 def _http_server_env(_set_env, monkeypatch):
     """Configure create_http_server for a live start with no optional integrations."""
@@ -389,7 +380,7 @@ class TestUnauthenticatedBindRefusal:
         from lm_mcp.transport.http import create_http_server
 
         monkeypatch.setenv("LM_HTTP_HOST", "0.0.0.0")
-        monkeypatch.setenv("LM_HTTP_PORT", str(_free_port("0.0.0.0")))
+        monkeypatch.setenv("LM_HTTP_PORT", str(free_port("0.0.0.0")))
         with pytest.raises(ValidationError) as exc:
             async with live_server(create_http_server()):
                 pass
@@ -409,7 +400,7 @@ class TestUnauthenticatedBindRefusal:
         from lm_mcp.transport.http import create_http_server
 
         monkeypatch.setenv("LM_HTTP_HOST", "0.0.0.0")
-        monkeypatch.setenv("LM_HTTP_PORT", str(_free_port("0.0.0.0")))
+        monkeypatch.setenv("LM_HTTP_PORT", str(free_port("0.0.0.0")))
         monkeypatch.setenv("LM_HTTP_ALLOW_UNAUTHENTICATED", "true")
         with caplog.at_level(logging.WARNING, logger="lm_mcp.transport.http"):
             async with (
@@ -430,7 +421,7 @@ class TestUnauthenticatedBindRefusal:
         from lm_mcp.transport.http import create_http_server
 
         monkeypatch.setenv("LM_HTTP_HOST", "127.0.0.1")
-        monkeypatch.setenv("LM_HTTP_PORT", str(_free_port("127.0.0.1")))
+        monkeypatch.setenv("LM_HTTP_PORT", str(free_port("127.0.0.1")))
         async with (
             live_server(create_http_server()) as port,
             httpx.AsyncClient(base_url=f"http://127.0.0.1:{port}") as client,

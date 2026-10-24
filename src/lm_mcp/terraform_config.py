@@ -5,6 +5,8 @@ from __future__ import annotations
 
 from pydantic_settings import BaseSettings
 
+from lm_mcp.config_warnings import log_unusable_config
+
 _cached_terraform_config: TerraformConfig | None = None
 
 
@@ -18,7 +20,8 @@ def get_terraform_config() -> TerraformConfig | None:
     if _cached_terraform_config is None:
         try:
             _cached_terraform_config = TerraformConfig()
-        except Exception:
+        except Exception as exc:
+            log_unusable_config("Terraform", TerraformConfig, exc, gate="TF_WORKSPACE_DIR")
             return None
     return _cached_terraform_config
 

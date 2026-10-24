@@ -5,6 +5,8 @@ from __future__ import annotations
 
 from pydantic_settings import BaseSettings
 
+from lm_mcp.config_warnings import log_unusable_config
+
 _cached_watsonx_config: WatsonxConfig | None = None
 
 
@@ -18,7 +20,8 @@ def get_watsonx_config() -> WatsonxConfig | None:
     if _cached_watsonx_config is None:
         try:
             _cached_watsonx_config = WatsonxConfig()
-        except Exception:
+        except Exception as exc:
+            log_unusable_config("watsonx", WatsonxConfig, exc, gate="WATSONX_API_KEY")
             return None
     return _cached_watsonx_config
 

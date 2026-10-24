@@ -52,6 +52,11 @@ class WatsonxClient:
         self._ts_model: Any = None
         self._llm_model: Any = None
 
+    @property
+    def llm_model_id(self) -> str:
+        """The language model that writes summaries."""
+        return LLM_MODEL_ID
+
     def _get_ts_model(self) -> Any:
         """Lazy-initialize the time series model."""
         if self._ts_model is None:

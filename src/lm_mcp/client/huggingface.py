@@ -38,6 +38,11 @@ class HuggingFaceClient:
         self._ttm_model: Any = None
         self._llm_pipeline: Any = None
 
+    @property
+    def llm_model_id(self) -> str:
+        """The local language model that writes summaries."""
+        return self._llm_model_name
+
     def _get_ttm_model(self) -> Any:
         """Lazy-load the TTM time series model."""
         if self._ttm_model is None:

@@ -97,9 +97,9 @@ Enriched collector status. Leading indicator for site-level events. Preferred ov
 - `history_days` (int, optional, default `7`)
 
 **Enrichments over `get_collectors`:**
-- `is_down` -- computed from status field and active CollectorDown alerts
+- `is_down` -- computed from status field and active CollectorDown alerts; `null` when the CollectorDown alert read fails, with `down_signal_unavailable: true`
 - `downstream_device_count` -- from `/device/devices?filter=currentCollectorId:{id}` (more reliable than stale `numberOfHosts`)
-- `active_collector_down_alerts` -- count of current open CollectorDown alerts for this collector hostname
+- `active_collector_down_alerts` -- count of current open CollectorDown alerts for this collector hostname; `null` when that read fails
 - `collector_down_history` -- recent history when requested
 
 ### get_power_events
@@ -137,12 +137,13 @@ The headline tool. Chains four signals into a single site-outage verdict with co
 3. Query `detect_alert_burst` filtered to Interface-family DataSources -- trips **Signal B**.
 4. Query `get_power_events` scoped to the group -- trips **Signal C**.
 5. Count dead/unreachable devices in the group -- trips **Signal D** when count exceeds `max(3, device_count // 5)`.
-6. Compute confidence score (see model below) and derive the verdict.
+6. Compute confidence score (see model below) and derive the verdict. A signal whose read fails is reported with `status: "unavailable"` and its `error`, and is left out of the score; the report then carries `confidence_level: "reduced"` and `unavailable_signals`.
 
 **Verdict thresholds:**
 - `>= 70` -- `site_outage_detected`
 - `>= 40` -- `possible_site_outage`
 - `<  40` -- `no_outage_signature`
+- `indeterminate` -- one or more signals could not be read, and their weights could change the verdict
 
 **Recommendations:** Actionable next-step hints based on which signals fired (collector verification, UPS review, correlation to common rack/switch).
 

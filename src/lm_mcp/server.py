@@ -7,7 +7,7 @@ import logging
 from fnmatch import fnmatch
 
 from mcp.server import Server
-from mcp.types import CallToolResult, CompleteResult, GetPromptResult, TextContent
+from mcp.types import CallToolResult, CompleteResult, GetPromptResult, TextContent, Tool
 
 from lm_mcp.client import LogicMonitorClient
 from lm_mcp.completions import get_completions
@@ -214,7 +214,15 @@ async def list_tools():
 
     Includes AWX tools only when the AWX client is configured.
     """
-    config = get_config()
+    return _filter_tools(collect_tools(), get_config())
+
+
+def collect_tools() -> list[Tool]:
+    """The tools this server can dispatch with its configured backends, before operator filters.
+
+    The AWX, watsonx and Terraform tools are included only when their backend is set.
+    Both transports build their tool lists from this.
+    """
     tools = list(TOOLS)
     if _awx_client is not None:
         tools.extend(AWX_TOOLS)
@@ -222,7 +230,7 @@ async def list_tools():
         tools.extend(WATSONX_TOOLS)
     if _tf_runner is not None:
         tools.extend(TF_TOOLS)
-    return _filter_tools(tools, config)
+    return tools
 
 
 # Session tools that don't require the LM client

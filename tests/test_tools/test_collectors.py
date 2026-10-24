@@ -430,7 +430,49 @@ class TestGetCollectorHealth:
         assert "undercounted" in data["warning"]
         col = data["collectors"][0]
         assert col["down_signal_unavailable"] is True
-        assert col["active_collector_down_alerts"] == 0
+        assert col["active_collector_down_alerts"] is None
+
+    @respx.mock
+    async def test_alert_query_failure_makes_is_down_unknown(self, auth):
+        """R4.4: a failed CollectorDown read leaves is_down null, whatever the status says.
+
+        The status word is not consulted once the alert read failed, so the
+        "dead" collector is unknown too, and neither counts as down.
+        """
+        from lm_mcp.tools.collectors import get_collector_health
+
+        client = LogicMonitorClient(
+            base_url="https://test.logicmonitor.com/santaba/rest",
+            auth=auth,
+            max_retries=0,
+        )
+        respx.get("https://test.logicmonitor.com/santaba/rest/setting/collector/collectors").mock(
+            return_value=httpx.Response(
+                200,
+                json={
+                    "items": [
+                        {"id": 1, "hostname": "col-a", "status": "dead", "numberOfHosts": 4},
+                        {"id": 2, "hostname": "col-b", "status": "normal", "numberOfHosts": 6},
+                    ]
+                },
+            )
+        )
+        respx.get("https://test.logicmonitor.com/santaba/rest/device/devices").mock(
+            return_value=httpx.Response(200, json={"items": [], "total": 5})
+        )
+        respx.get("https://test.logicmonitor.com/santaba/rest/alert/alerts").mock(
+            return_value=httpx.Response(500, json={"errorMessage": "boom"})
+        )
+
+        result = await get_collector_health(client)
+        data = json.loads(result[0].text)
+
+        for col in data["collectors"]:
+            assert col["is_down"] is None
+            assert col["down_signal_unavailable"] is True
+            assert col["active_collector_down_alerts"] is None
+        assert data["collectors_down"] == 0
+        assert data["collectors_down_signal_unavailable"] == 2
 
     @respx.mock
     async def test_lists_all_collectors_when_no_scope(self, client):

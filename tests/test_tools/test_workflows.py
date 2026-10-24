@@ -4,9 +4,13 @@
 from __future__ import annotations
 
 import json
+import logging
+import time
 from unittest.mock import AsyncMock, patch
 
+import httpx
 import pytest
+import respx
 
 from lm_mcp.auth.bearer import BearerAuth
 from lm_mcp.client import LogicMonitorClient
@@ -22,6 +26,7 @@ from lm_mcp.tools.workflows import (
     search_tools,
     triage,
 )
+from tests.watsonx_sdk import real_watsonx_client
 
 
 @pytest.fixture
@@ -56,6 +61,153 @@ def _mock_text(data: dict) -> list:
 def _patch_sub(module_path: str, data: dict) -> patch:
     """Return an AsyncMock patch that returns TextContent wrapping *data*."""
     return patch(module_path, new_callable=AsyncMock, return_value=_mock_text(data))
+
+
+# ---------------------------------------------------------------------------
+# Helpers for driving detect_site_outage through respx
+# ---------------------------------------------------------------------------
+
+_BASE = "https://test.logicmonitor.com/santaba/rest"
+
+
+def _ok(payload: dict) -> httpx.Response:
+    return httpx.Response(200, json=payload)
+
+
+def _portal_error() -> httpx.Response:
+    return httpx.Response(500, json={"errorMessage": "portal unavailable"})
+
+
+def _alert_window(*alerts: dict) -> httpx.Response:
+    return _ok({"items": list(alerts), "total": len(alerts)})
+
+
+def _power_alert() -> dict:
+    return {
+        "id": 7,
+        "dataSourceName": "APC_UPS_Battery",
+        "alertName": "OnBattery",
+        "monitorObjectName": "ups-1",
+        "startEpoch": int(time.time()) - 60,
+        "severity": 4,
+    }
+
+
+def _mock_site_portal(
+    devices: list[dict],
+    collector_down: httpx.Response,
+    burst: httpx.Response,
+    power: httpx.Response,
+) -> None:
+    """Route one detect_site_outage run on group 42, served by collector 1.
+
+    Burst detection and power events read the same alert window with the same
+    filter, burst first, so the window reads are served in that order. The
+    CollectorDown read is told apart by its filter.
+    """
+
+    def device_route(request: httpx.Request) -> httpx.Response:
+        if request.url.params.get("filter", "").startswith("currentCollectorId"):
+            return _ok({"items": [], "total": len(devices)})
+        return _ok({"items": devices, "total": len(devices)})
+
+    window_reads = iter([burst, power])
+
+    def alert_route(request: httpx.Request) -> httpx.Response:
+        if "CollectorDown" in request.url.params.get("filter", ""):
+            return collector_down
+        return next(window_reads)
+
+    respx.get(f"{_BASE}/device/devices").mock(side_effect=device_route)
+    respx.get(f"{_BASE}/setting/collector/collectors/1").mock(
+        return_value=_ok({"id": 1, "hostname": "col-01", "status": 1, "numberOfHosts": 5})
+    )
+    respx.get(f"{_BASE}/device/groups/42").mock(
+        return_value=_ok({"id": 42, "fullPath": "Sites/HQ"})
+    )
+    respx.get(f"{_BASE}/alert/alerts").mock(side_effect=alert_route)
+
+
+def _site_devices(count: int, status: str) -> list[dict]:
+    return [
+        {"id": i, "displayName": f"sw-{i}", "hostStatus": status, "currentCollectorId": 1}
+        for i in range(1, count + 1)
+    ]
+
+
+@pytest.fixture
+def lm_env(monkeypatch):
+    """LM credentials and no tool filters, so composite tools pass check_required_tools."""
+    monkeypatch.setenv("LM_PORTAL", "test.logicmonitor.com")
+    monkeypatch.setenv("LM_BEARER_TOKEN", "test-bearer-token-value")
+    monkeypatch.delenv("LM_ENABLED_TOOLS", raising=False)
+    monkeypatch.delenv("LM_DISABLED_TOOLS", raising=False)
+    monkeypatch.delenv("LM_MCP_CATEGORIES", raising=False)
+
+
+_DS_URL = f"{_BASE}/device/devices/1/devicedatasources"
+
+
+def _mock_capacity_portal(
+    instance_data: dict[int, httpx.Response | list[httpx.Response]],
+) -> None:
+    """Route capacity_plan for device 1, datasource CPU (10).
+
+    An instance given one response serves it to every data read; one given a list
+    serves the reads in order (forecast, trend, seasonality, then change points).
+    """
+    respx.get(f"{_BASE}/device/devices/1").mock(
+        return_value=_ok({"id": 1, "displayName": "server-01"})
+    )
+    respx.get(_DS_URL).mock(
+        return_value=_ok({"items": [{"id": 10, "dataSourceName": "CPU"}], "total": 1})
+    )
+    respx.get(f"{_DS_URL}/10/instances").mock(
+        return_value=_ok(
+            {
+                "items": [{"id": iid, "displayName": f"cpu{iid}"} for iid in instance_data],
+                "total": len(instance_data),
+            }
+        )
+    )
+    for iid, response in instance_data.items():
+        route = respx.get(f"{_DS_URL}/10/instances/{iid}/data")
+        if isinstance(response, list):
+            route.mock(side_effect=response)
+        else:
+            route.mock(return_value=response)
+
+
+def _rising_cpu_and_sparse_mem() -> httpx.Response:
+    """cpu climbs 10 per 5 minutes toward the 90 threshold; mem has one sample."""
+    rows = [
+        [10.0, "No Data"],
+        [20.0, "No Data"],
+        [30.0, 55.0],
+        [40.0, "No Data"],
+        [50.0, "No Data"],
+    ]
+    start = int(time.time()) - 3600
+    return _ok(
+        {
+            "dataPoints": ["cpu", "mem"],
+            "values": rows,
+            "time": [(start + i * 300) * 1000 for i in range(len(rows))],
+        }
+    )
+
+
+def _swinging_cpu() -> httpx.Response:
+    """cpu swings between 5 and 95 every 5 minutes, which classify_trend calls volatile."""
+    rows = [[5.0], [95.0], [5.0], [95.0], [5.0], [95.0]]
+    start = int(time.time()) - 3600
+    return _ok(
+        {
+            "dataPoints": ["cpu"],
+            "values": rows,
+            "time": [(start + i * 300) * 1000 for i in range(len(rows))],
+        }
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -489,6 +641,71 @@ class TestCapacityPlan:
         assert len(data["datasources"]) == 1
         reset_config()
 
+    @respx.mock
+    async def test_summary_carries_forecast_headlines_and_instance_errors(self, auth, lm_env):
+        """R4.4: the summary keeps each forecast's headline and every per-instance error.
+
+        cpu100 forecasts; cpu101's data read fails, so its forecast, trend and
+        seasonality each fail. The raw datasources block is still trimmed.
+        """
+        client = LogicMonitorClient(base_url=_BASE, auth=auth, max_retries=0)
+        _mock_capacity_portal({100: _rising_cpu_and_sparse_mem(), 101: _portal_error()})
+
+        result = await capacity_plan(client, device_id=1)
+
+        data = json.loads(result[0].text)
+        assert "datasources" not in data
+        cpu, mem = data["forecast_summary"]
+        assert cpu["datasource"] == "CPU"
+        assert cpu["instance"] == "cpu100"
+        assert cpu["datapoint"] == "cpu"
+        assert cpu["method"] == "linear"
+        assert cpu["trend"] == "increasing"
+        assert cpu["days_until_breach"] > 0
+        assert mem == {
+            "datasource": "CPU",
+            "instance": "cpu100",
+            "datapoint": "mem",
+            "status": "insufficient_data",
+        }
+        failed = [w for w in data["warnings"] if "CPU/cpu101" in w]
+        assert [w.split(" for ")[0] for w in failed] == ["forecast", "trend", "seasonality"]
+        assert all("portal unavailable" in w for w in failed)
+
+    @respx.mock
+    async def test_summary_carries_a_change_point_failure(self, auth, lm_env):
+        """R4.4: a failed change-point read on a volatile instance reaches the summary warnings.
+
+        cpu102's trend is volatile, so capacity_plan reads its series a fourth time
+        for change points, and that read fails.
+        """
+        client = LogicMonitorClient(base_url=_BASE, auth=auth, max_retries=0)
+        reads = [_swinging_cpu(), _swinging_cpu(), _swinging_cpu(), _portal_error()]
+        _mock_capacity_portal({102: reads})
+
+        result = await capacity_plan(client, device_id=1)
+
+        data = json.loads(result[0].text)
+        (warning,) = data["warnings"]
+        assert warning.startswith("change_points for CPU/cpu102 failed:")
+        assert "portal unavailable" in warning
+
+    @respx.mock
+    async def test_full_detail_is_unchanged(self, auth, lm_env):
+        """R4.4: detail_level=full keeps the raw block and adds no summary or copied errors."""
+        client = LogicMonitorClient(base_url=_BASE, auth=auth, max_retries=0)
+        _mock_capacity_portal({100: _rising_cpu_and_sparse_mem(), 101: _portal_error()})
+
+        result = await capacity_plan(client, device_id=1, detail_level="full")
+
+        data = json.loads(result[0].text)
+        assert "forecast_summary" not in data
+        assert "warnings" not in data
+        failed = data["datasources"][0]["instances"][1]
+        assert failed["instance"] == "cpu101"
+        assert "portal unavailable" in failed["forecast_error"]
+        assert "portal unavailable" in failed["trend_error"]
+
     async def test_surfaces_forecast_failure(self, client, monkeypatch):
         """A failing forecast sub-tool is surfaced as forecast_error, not a silent None."""
         monkeypatch.setenv("LM_PORTAL", "test.logicmonitor.com")
@@ -566,6 +783,57 @@ class TestCapacityPlan:
         data = json.loads(result[0].text)
         assert data["datasources"] == []
         reset_config()
+
+
+class TestSummaryFailureWarnings:
+    """R4.4: a requested NL summary that does not arrive is reported in warnings."""
+
+    @respx.mock
+    async def test_summary_without_a_model_is_warned(self, auth, lm_env):
+        """R4.4: triage(summarize=True) with no summary model returns a warning saying so."""
+        respx.get(url__startswith=_BASE).mock(return_value=_ok({"items": [], "total": 0}))
+        client = LogicMonitorClient(base_url=_BASE, auth=auth, max_retries=0)
+
+        result = await triage(client, summarize=True)
+
+        data = json.loads(result[0].text)
+        assert "nl_summary" not in data
+        (warning,) = data["warnings"]
+        assert warning.startswith("NL summary requested but")
+        assert "not configured" in warning
+
+    @respx.mock
+    async def test_failing_summary_names_the_error(self, auth, lm_env, caplog):
+        """R4.4: triage(summarize=True) with watsonx failing returns the error in warnings.
+
+        The failure is also logged at WARNING on lm_mcp.audit with its traceback.
+        """
+        from lm_mcp.server import _set_watsonx_client
+
+        respx.get(url__startswith=_BASE).mock(return_value=_ok({"items": [], "total": 0}))
+        client = LogicMonitorClient(base_url=_BASE, auth=auth, max_retries=0)
+        _set_watsonx_client(real_watsonx_client())
+
+        with (
+            patch("ibm_watsonx_ai.foundation_models.ModelInference", autospec=True) as model_cls,
+            caplog.at_level(logging.WARNING, logger="lm_mcp.audit"),
+        ):
+            model_cls.return_value.generate_text.side_effect = RuntimeError(
+                "503 Service Unavailable"
+            )
+            result = await triage(client, summarize=True)
+
+        data = json.loads(result[0].text)
+        assert "nl_summary" not in data
+        (warning,) = data["warnings"]
+        assert warning.startswith("NL summary failed")
+        assert "503 Service Unavailable" in warning
+        model_cls.return_value.generate_text.assert_called_once()
+        (record,) = [r for r in caplog.records if "NL summary failed" in r.getMessage()]
+        assert record.name == "lm_mcp.audit"
+        assert record.levelno == logging.WARNING
+        assert record.exc_info is not None
+        assert "503 Service Unavailable" in record.getMessage()
 
 
 # ---------------------------------------------------------------------------
@@ -1151,8 +1419,10 @@ class TestDetectSiteOutage:
         assert len(data["warnings"]) >= 1
         assert any("collector health probes failed" in w for w in data["warnings"])
         assert any("collector_id=1" in w for w in data["warnings"])
-        # No CollectorDown signal → collector_down triggered is False
-        assert data["signals"]["collector_down"]["triggered"] is False
+        # A failed probe leaves the CollectorDown signal unknown, not untriggered.
+        assert data["signals"]["collector_down"]["triggered"] is None
+        assert data["signals"]["collector_down"]["status"] == "unavailable"
+        assert data["unavailable_signals"] == ["collector_down"]
 
     async def test_partial_collector_failures_do_not_abort_loop(self, client):
         """One bad collector probe no longer aborts the rest (v3.8.2 fix).
@@ -1227,6 +1497,135 @@ class TestDetectSiteOutage:
         # Warning mentions the failed collector specifically.
         assert any("collector_id=20" in w for w in data["warnings"])
         assert any("1/3" in w for w in data["warnings"])
+
+    @respx.mock
+    async def test_failed_burst_read_is_unavailable_not_negative(self, auth):
+        """R4.4: a failed burst read is unknown; power alone cannot settle the verdict.
+
+        Power (25) is the only known trigger. Read as untriggered, the lost burst
+        signal would have scored 25 and said no_outage_signature; known, it could
+        have reached 50, so the verdict cannot be named.
+        """
+        from lm_mcp.tools.workflows import detect_site_outage
+
+        client = LogicMonitorClient(base_url=_BASE, auth=auth, max_retries=0)
+        _mock_site_portal(
+            devices=_site_devices(1, "normal"),
+            collector_down=_alert_window(),
+            burst=_portal_error(),
+            power=_alert_window(_power_alert()),
+        )
+
+        result = await detect_site_outage(client, group_id=42)
+
+        data = json.loads(result[0].text)
+        burst = data["signals"]["interface_burst"]
+        assert burst["triggered"] is None
+        assert burst["status"] == "unavailable"
+        assert "portal unavailable" in burst["error"]
+        assert data["signals"]["power_events"] == {"triggered": True, "count": 1, "weight": 25}
+        assert data["confidence"] == 25
+        assert data["confidence_level"] == "reduced"
+        assert data["unavailable_signals"] == ["interface_burst"]
+        assert data["verdict"] == "indeterminate"
+        assert any("Burst detection failed" in w for w in data["warnings"])
+
+    @respx.mock
+    async def test_unavailable_signal_that_cannot_change_the_verdict_keeps_it(self, auth):
+        """R4.4: the verdict comes from the signals that read when the lost one cannot move it.
+
+        CollectorDown (40), power (25) and silence (10) score 75; the lost burst
+        signal could only raise that, and site_outage_detected starts at 70.
+        """
+        from lm_mcp.tools.workflows import detect_site_outage
+
+        client = LogicMonitorClient(base_url=_BASE, auth=auth, max_retries=0)
+        _mock_site_portal(
+            devices=_site_devices(5, "dead"),
+            collector_down=_alert_window(
+                {"id": 9, "alertType": "CollectorDown", "monitorObjectName": "col-01"}
+            ),
+            burst=_portal_error(),
+            power=_alert_window(_power_alert()),
+        )
+
+        result = await detect_site_outage(client, group_id=42)
+
+        data = json.loads(result[0].text)
+        assert data["verdict"] == "site_outage_detected"
+        assert data["confidence"] == 75
+        assert data["confidence_level"] == "reduced"
+        assert data["unavailable_signals"] == ["interface_burst"]
+        assert data["signals"]["collector_down"]["triggered"] is True
+
+    @respx.mock
+    async def test_every_alert_read_failing_is_indeterminate(self, auth):
+        """R4.4: with the CollectorDown, burst and power reads all failing, no verdict is named.
+
+        Throttling during an outage fails exactly these reads; before R4.4 the run
+        said no_outage_signature.
+        """
+        from lm_mcp.tools.workflows import detect_site_outage
+
+        client = LogicMonitorClient(base_url=_BASE, auth=auth, max_retries=0)
+        _mock_site_portal(
+            devices=_site_devices(1, "normal"),
+            collector_down=_portal_error(),
+            burst=_portal_error(),
+            power=_portal_error(),
+        )
+
+        result = await detect_site_outage(client, group_id=42)
+
+        data = json.loads(result[0].text)
+        assert data["verdict"] == "indeterminate"
+        assert data["confidence"] == 0
+        assert data["confidence_level"] == "reduced"
+        assert data["unavailable_signals"] == [
+            "collector_down",
+            "interface_burst",
+            "power_events",
+        ]
+        for name in ("collector_down", "interface_burst", "power_events"):
+            assert data["signals"][name]["triggered"] is None
+            assert data["signals"][name]["status"] == "unavailable"
+        assert data["signals"]["device_silence"]["triggered"] is False
+        assert not any("No outage signature" in r for r in data["recommendations"])
+
+    @respx.mock
+    async def test_all_signals_healthy_output_is_unchanged(self, auth):
+        """R4.4: with every read answering, the report carries no unavailable-signal fields."""
+        from lm_mcp.tools.workflows import detect_site_outage
+
+        client = LogicMonitorClient(base_url=_BASE, auth=auth, max_retries=0)
+        _mock_site_portal(
+            devices=_site_devices(1, "normal"),
+            collector_down=_alert_window(),
+            burst=_alert_window(),
+            power=_alert_window(),
+        )
+
+        result = await detect_site_outage(client, group_id=42)
+
+        assert json.loads(result[0].text) == {
+            "verdict": "no_outage_signature",
+            "confidence": 0,
+            "group_id": 42,
+            "window_seconds": 300,
+            "hours_back": 1,
+            "scope": {"devices_in_group": 1, "dead_devices": 0, "collectors_serving_group": 1},
+            "signals": {
+                "collector_down": {"triggered": False, "count": 0},
+                "interface_burst": {"triggered": False, "burst_count": 0},
+                "power_events": {"triggered": False, "count": 0},
+                "device_silence": {"triggered": False, "dead_devices": 0, "threshold": 3},
+            },
+            "recommendations": [
+                "No outage signature detected. If symptoms persist, widen the group scope "
+                "or lengthen the hours_back window."
+            ],
+            "warnings": [],
+        }
 
     async def test_required_tools_disabled_blocks_composite(self, client, monkeypatch):
         """LM_DISABLED_TOOLS matching a required sub-tool blocks execution."""

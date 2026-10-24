@@ -122,8 +122,9 @@ async def _maybe_summarize(
 ) -> None:
     """Optionally append NL summary to a workflow report via watsonx.
 
-    Does nothing if summarize is False or watsonx is not configured.
-    On failure, appends a warning rather than raising.
+    Does nothing if summarize is False. When no summary model is configured, or
+    the summary call fails, appends a warning and attaches the warnings list to
+    the report, so the warning is returned even if it is the only one.
     """
     if not summarize:
         return
@@ -134,12 +135,19 @@ async def _maybe_summarize(
 
         wx = get_watsonx_client()
         if wx is None:
+            warnings.append(
+                "NL summary requested but not configured: set WATSONX_API_KEY or "
+                "install the HuggingFace fallback"
+            )
+            report["warnings"] = warnings
             return
 
         summary = await nl_summarize_helper(wx, report, workflow_name)
         report["nl_summary"] = summary
     except Exception as exc:
+        _AUDIT.warning("%s: NL summary failed: %s", workflow_name, exc, exc_info=True)
         warnings.append(f"NL summary failed: {exc}")
+        report["warnings"] = warnings
 
 
 # ---------------------------------------------------------------------------
@@ -696,6 +704,12 @@ async def capacity_plan(
 
         report["datasources"] = ds_reports
 
+        # The summary level trims the raw datasources block, so it keeps each
+        # forecast's headline and every per-instance error in its place.
+        if detail_level == "summary":
+            report["forecast_summary"] = _forecast_summary(ds_reports)
+            warnings.extend(_instance_errors(ds_reports))
+
         if warnings:
             report["warnings"] = warnings
 
@@ -706,6 +720,51 @@ async def capacity_plan(
         return format_response(report)
     except Exception as e:
         return handle_error(e)
+
+
+# Per-instance error keys capacity_plan records, one per analysis.
+_INSTANCE_ERROR_KEYS = ("forecast_error", "trend_error", "seasonality_error", "change_points_error")
+
+
+def _forecast_summary(ds_reports: list[dict]) -> list[dict]:
+    """One headline row per forecast datapoint: method, days to breach, trend.
+
+    A datapoint the forecast could not run on carries its status instead.
+    """
+    rows: list[dict] = []
+    for ds in ds_reports:
+        for inst in ds["instances"]:
+            forecasts = (inst.get("forecast") or {}).get("forecasts") or {}
+            for datapoint, fc in forecasts.items():
+                row = {
+                    "datasource": ds["datasource"],
+                    "instance": inst["instance"],
+                    "datapoint": datapoint,
+                }
+                if "status" in fc:
+                    row["status"] = fc["status"]
+                else:
+                    row["method"] = fc.get("method_used")
+                    row["days_until_breach"] = fc.get("days_until_breach")
+                    row["trend"] = fc.get("trend")
+                    if fc.get("fallback_reason"):
+                        row["fallback_reason"] = fc["fallback_reason"]
+                rows.append(row)
+    return rows
+
+
+def _instance_errors(ds_reports: list[dict]) -> list[str]:
+    """Every per-instance analysis error, as warning lines naming datasource and instance."""
+    errors: list[str] = []
+    for ds in ds_reports:
+        for inst in ds["instances"]:
+            for key in _INSTANCE_ERROR_KEYS:
+                if key in inst:
+                    analysis = key.removesuffix("_error")
+                    errors.append(
+                        f"{analysis} for {ds['datasource']}/{inst['instance']} failed: {inst[key]}"
+                    )
+    return errors
 
 
 # ---------------------------------------------------------------------------
@@ -1425,6 +1484,28 @@ _SITE_OUTAGE_REQUIRED = [
 
 _POWER_KEYWORDS = ("ups", "pdu", "battery", "power")
 
+# Confidence each triggered signal adds to the site-outage score.
+_SITE_OUTAGE_WEIGHTS = {
+    "collector_down": 40,
+    "interface_burst": 25,
+    "power_events": 25,
+    "device_silence": 10,
+}
+
+
+def _site_outage_verdict(score: int) -> str:
+    """Map a site-outage confidence score to its verdict."""
+    if score >= 70:
+        return "site_outage_detected"
+    if score >= 40:
+        return "possible_site_outage"
+    return "no_outage_signature"
+
+
+def _unavailable_signal(error: str) -> dict:
+    """Breakdown entry for a signal whose read failed: unknown, not untriggered."""
+    return {"triggered": None, "status": "unavailable", "error": error}
+
 
 async def detect_site_outage(
     client: LogicMonitorClient,
@@ -1445,6 +1526,11 @@ async def detect_site_outage(
       A>0: +40  |  B>0: +25  |  C>0: +25  |  D>threshold: +10
 
     Verdict: >=70 site_outage_detected; >=40 possible_site_outage; else no.
+
+    A signal whose read fails is reported with status "unavailable" and its
+    error, and is left out of the score. The report then carries
+    confidence_level "reduced" and unavailable_signals; when the lost signals'
+    weights could change the verdict, the verdict is "indeterminate".
 
     Args:
         client: LogicMonitor API client.
@@ -1481,11 +1567,16 @@ async def detect_site_outage(
         dead_devices = _count_dead_devices(devices)
         collector_ids = _collector_ids_from_devices(devices)
 
+        # Signals whose read failed, by signal name, with the error. They are left
+        # out of the score instead of being scored as not triggered.
+        unavailable: dict[str, str] = {}
+
         # Signal A: CollectorDown on collectors serving this group. Each
         # collector is probed independently so a single bad collector ID
         # (e.g., orphaned reference to a deleted collector) does not abort
         # the rest of the signal.
         collector_down_count = 0
+        collectors_unknown = 0
         collectors_inspected: list[dict] = []
         collector_probe_failures: list[str] = []
         for cid in collector_ids:
@@ -1500,6 +1591,8 @@ async def detect_site_outage(
                 collectors_inspected.append(entry)
                 if entry.get("is_down"):
                     collector_down_count += 1
+                elif entry.get("is_down") is None:
+                    collectors_unknown += 1
             except Exception as exc:
                 collector_probe_failures.append(f"collector_id={cid}: {exc}")
 
@@ -1509,6 +1602,15 @@ async def detect_site_outage(
             warnings.append(
                 f"{len(collector_probe_failures)}/{len(collector_ids)} "
                 f"collector health probes failed: {failures_shown}{suffix}"
+            )
+
+        # One collector known to be down triggers the signal; otherwise any
+        # collector whose state is unknown could have triggered it.
+        collectors_unchecked = collectors_unknown + len(collector_probe_failures)
+        if collector_down_count == 0 and collectors_unchecked:
+            unavailable["collector_down"] = (
+                f"{collectors_unchecked}/{len(collector_ids)} collector(s) could not be "
+                "checked for CollectorDown"
             )
 
         # Signal B: mass interface-down burst in the window.
@@ -1527,6 +1629,7 @@ async def detect_site_outage(
             burst_signal = burst_data
         except Exception as exc:
             warnings.append(f"Burst detection failed: {exc}")
+            unavailable["interface_burst"] = f"Burst detection failed: {exc}"
 
         # Signal C: power events (UPS/PDU on-battery, battery-runtime, etc.).
         power_events_count = 0
@@ -1542,49 +1645,58 @@ async def detect_site_outage(
             power_events_preview = list(power_data.get("events", []))[:10]
         except Exception as exc:
             warnings.append(f"Power event query failed: {exc}")
+            unavailable["power_events"] = f"Power event query failed: {exc}"
 
         # Score and verdict.
         silence_threshold = max(3, device_count // 5)  # 20% of group or 3 whichever higher
         confidence = 0
         signals_breakdown = {}
-        if collector_down_count > 0:
-            confidence += 40
+        if "collector_down" in unavailable:
+            signals_breakdown["collector_down"] = _unavailable_signal(unavailable["collector_down"])
+        elif collector_down_count > 0:
+            confidence += _SITE_OUTAGE_WEIGHTS["collector_down"]
             signals_breakdown["collector_down"] = {
                 "triggered": True,
                 "count": collector_down_count,
-                "weight": 40,
+                "weight": _SITE_OUTAGE_WEIGHTS["collector_down"],
             }
         else:
             signals_breakdown["collector_down"] = {"triggered": False, "count": 0}
 
         burst_count = int((burst_signal or {}).get("bursts_detected", 0))
-        if burst_count > 0:
-            confidence += 25
+        if "interface_burst" in unavailable:
+            signals_breakdown["interface_burst"] = _unavailable_signal(
+                unavailable["interface_burst"]
+            )
+        elif burst_count > 0:
+            confidence += _SITE_OUTAGE_WEIGHTS["interface_burst"]
             signals_breakdown["interface_burst"] = {
                 "triggered": True,
                 "burst_count": burst_count,
-                "weight": 25,
+                "weight": _SITE_OUTAGE_WEIGHTS["interface_burst"],
             }
         else:
             signals_breakdown["interface_burst"] = {"triggered": False, "burst_count": 0}
 
-        if power_events_count > 0:
-            confidence += 25
+        if "power_events" in unavailable:
+            signals_breakdown["power_events"] = _unavailable_signal(unavailable["power_events"])
+        elif power_events_count > 0:
+            confidence += _SITE_OUTAGE_WEIGHTS["power_events"]
             signals_breakdown["power_events"] = {
                 "triggered": True,
                 "count": power_events_count,
-                "weight": 25,
+                "weight": _SITE_OUTAGE_WEIGHTS["power_events"],
             }
         else:
             signals_breakdown["power_events"] = {"triggered": False, "count": 0}
 
         if dead_devices >= silence_threshold:
-            confidence += 10
+            confidence += _SITE_OUTAGE_WEIGHTS["device_silence"]
             signals_breakdown["device_silence"] = {
                 "triggered": True,
                 "dead_devices": dead_devices,
                 "threshold": silence_threshold,
-                "weight": 10,
+                "weight": _SITE_OUTAGE_WEIGHTS["device_silence"],
             }
         else:
             signals_breakdown["device_silence"] = {
@@ -1594,12 +1706,12 @@ async def detect_site_outage(
             }
 
         confidence = min(confidence, 100)
-        if confidence >= 70:
-            verdict = "site_outage_detected"
-        elif confidence >= 40:
-            verdict = "possible_site_outage"
-        else:
-            verdict = "no_outage_signature"
+        verdict = _site_outage_verdict(confidence)
+        # The lost signals could have added at most their weights. When that
+        # ceiling names a different verdict, the signals that read cannot decide.
+        ceiling = min(confidence + sum(_SITE_OUTAGE_WEIGHTS[name] for name in unavailable), 100)
+        if _site_outage_verdict(ceiling) != verdict:
+            verdict = "indeterminate"
 
         recommendations = _site_outage_recommendations(
             verdict, signals_breakdown, power_events_count, collector_down_count
@@ -1608,6 +1720,11 @@ async def detect_site_outage(
         report: dict = {
             "verdict": verdict,
             "confidence": confidence,
+            **(
+                {"confidence_level": "reduced", "unavailable_signals": list(unavailable)}
+                if unavailable
+                else {}
+            ),
             "group_id": group_id,
             "window_seconds": window_seconds,
             "hours_back": hours_back,
@@ -1690,6 +1807,12 @@ def _site_outage_recommendations(
     recs: list[str] = []
     if verdict == "site_outage_detected":
         recs.append("Treat as a single site-level incident; do not triage individual alerts.")
+    if verdict == "indeterminate":
+        lost = [name for name, sig in signals.items() if sig.get("status") == "unavailable"]
+        recs.append(
+            f"Signals could not be read ({', '.join(lost)}), and they could change the "
+            "verdict. Re-run once the failed reads in warnings succeed."
+        )
     if collector_down > 0:
         recs.append(
             "Verify collector host connectivity — collector is the typical first signal "

@@ -4,9 +4,11 @@
 from __future__ import annotations
 
 import json
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+
+from tests.watsonx_sdk import real_watsonx_client
 
 
 class TestWatsonxSummarizeTool:
@@ -14,22 +16,40 @@ class TestWatsonxSummarizeTool:
 
     @pytest.mark.asyncio
     async def test_returns_formatted_response(self):
-        """watsonx_summarize returns TextContent with summary and model."""
+        """watsonx_summarize returns TextContent with the summary and the watsonx model id."""
+        from lm_mcp.client.watsonx import LLM_MODEL_ID
         from lm_mcp.tools.watsonx import watsonx_summarize
 
-        mock_client = AsyncMock()
-        mock_client.summarize = AsyncMock(return_value="Portal is healthy. No action needed.")
-
-        result = await watsonx_summarize(
-            mock_client,
-            data='{"noise_score": 12}',
-            context="portal overview",
-        )
+        client = real_watsonx_client()
+        with patch("ibm_watsonx_ai.foundation_models.ModelInference", autospec=True) as model_cls:
+            model_cls.return_value.generate_text.return_value = (
+                "Portal is healthy. No action needed."
+            )
+            result = await watsonx_summarize(
+                client,
+                data='{"noise_score": 12}',
+                context="portal overview",
+            )
 
         assert len(result) == 1
         data = json.loads(result[0].text)
         assert data["summary"] == "Portal is healthy. No action needed."
-        assert "granite" in data["model"]
+        assert data["model"] == LLM_MODEL_ID
+
+    @pytest.mark.asyncio
+    async def test_huggingface_fallback_reports_its_own_model(self):
+        """R4.5: a summary the HuggingFace fallback wrote names the local model, not IBM's."""
+        from lm_mcp.client.huggingface import HuggingFaceClient
+        from lm_mcp.tools.watsonx import watsonx_summarize
+
+        client = HuggingFaceClient(llm_model="ibm-granite/granite-3.3-2b-instruct")
+        client._llm_pipeline = MagicMock(return_value=[{"generated_text": "All quiet."}])
+
+        result = await watsonx_summarize(client, data='{"alerts": []}')
+
+        data = json.loads(result[0].text)
+        assert data["summary"] == "All quiet."
+        assert data["model"] == "ibm-granite/granite-3.3-2b-instruct"
 
     @pytest.mark.asyncio
     async def test_handles_error_gracefully(self):
