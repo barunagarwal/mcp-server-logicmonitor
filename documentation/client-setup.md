@@ -101,7 +101,7 @@ For surgical control, combine with `LM_ENABLED_TOOLS`:
 }
 ```
 
-The two filters compose by intersection: `LM_MCP_CATEGORIES` only narrows further, never expands. Default behavior (env var unset) returns all 306 tools — backwards compatible.
+The two filters compose by intersection: `LM_MCP_CATEGORIES` only narrows further, never expands. Default behavior (env var unset) returns all 307 tools — backwards compatible.
 
 ### Claude Desktop
 

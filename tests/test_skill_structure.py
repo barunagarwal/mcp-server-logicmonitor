@@ -23,6 +23,7 @@ EXPECTED_SKILLS = [
     "lm-portal",
     "lm-triage",
     "lm-remediate",
+    "lm-collector-debug",
 ]
 
 

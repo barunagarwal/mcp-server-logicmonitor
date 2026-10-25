@@ -2,7 +2,7 @@
 
 <!-- GENERATED FILE. Do not edit by hand. Regenerate: uv run python tests/test_tools_doc.py -->
 
-Reference for all 306 tools the LogicMonitor MCP server can advertise (core plus the optional Ansible Automation Platform, Terraform, and IBM watsonx.ai integrations). The **Write** column shows whether a tool requires `LM_ENABLE_WRITE_OPERATIONS=true`.
+Reference for all 307 tools the LogicMonitor MCP server can advertise (core plus the optional Ansible Automation Platform, Terraform, and IBM watsonx.ai integrations). The **Write** column shows whether a tool requires `LM_ENABLE_WRITE_OPERATIONS=true`.
 
 This file is generated from the tool registry (`src/lm_mcp/registry.py`) and the domain index (`lm://guide/tool-categories`), and kept in sync by `tests/test_tools_doc.py`. At runtime, discover tools with the `search_tools` tool.
 
@@ -117,6 +117,7 @@ Collector status and management
 | `update_collector_group` | Update a collector group (requires write permission) | Yes |
 | `delete_collector_group` | Delete a collector group (requires write permission). Blocks if collectors are still assigned. | Yes |
 | `get_collector_health` | Enriched collector status with time-since-last-contact, downstream device count, dependent alert count, and optional CollectorDown history. Leading indicator for site-level events. Prefer this over `get_collectors` when investigating potential outages. | No |
+| `collector_debug` | Run ONE collector debug command from a fixed list and return what the collector said. Write-gated: each listed command is meant to read, but the call runs it on the collector and opens a debug session that the portal records in its Audit Log under this server's API credentials, so it needs LM_ENABLE_WRITE_OPERATIONS=true and the collector Debug permission. Callers pick a command and that command's typed args (any other key is refused); the tool builds the command line and refuses anything that changes the collector, runs code on its host or carries a credential; http sends only a GET, but a device that acts on a GET can be changed by one. Device probes (ping, nslookup, macaddress, snmpdiagnose, snmpget, snmpwalk, wmi, winrm, cim, sslcerts, http) need device_id and always target the device record's host; an http URL must name that host. checkserverconnectivity targets the configured portal. Use after a collector has been named, to confirm one narrow question: uptime, health_check (parsed per-method all-NaN rates), perf, getconfig. Stops at budget_seconds. A status of answered or no_reply is a result; refused, disabled, unsupported, rate_limited and error come back as errors with the JSON body on a Details line, and a request refused before sending is a validation error. Secrets in the output are masked, best effort. | Yes |
 
 ## Networking
 

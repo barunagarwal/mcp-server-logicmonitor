@@ -352,3 +352,19 @@ class TestPairedNameValueRedaction:
 
         assert "wmi.pass" in caplog.text
         assert "hunter2" not in caplog.text
+
+
+def test_every_portal_write_tool_is_audited_as_a_write():
+    """A tool annotated as a portal write (not read-only, open world) gets the write audit line."""
+    from lm_mcp.logging import is_write_tool
+    from lm_mcp.registry import TOOLS
+
+    missed = [
+        t.name
+        for t in TOOLS
+        if t.annotations
+        and t.annotations.readOnlyHint is False
+        and t.annotations.openWorldHint
+        and not is_write_tool(t.name)
+    ]
+    assert missed == []

@@ -7,6 +7,44 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- `collector_debug`: runs one collector debug command from a fixed list of 29 commands
+  (collector health, task lists, logs, device probes) and returns what the collector said.
+  It is write-gated: each listed command is meant to read, but the call runs it on the collector
+  and opens a debug session recorded in the portal's Audit Log, so it needs
+  `LM_ENABLE_WRITE_OPERATIONS=true` and the collector Debug permission, and it gets the
+  write audit line.
+  - Callers pass a command name and that command's own arguments; any other key is refused.
+    The tool builds the command line and refuses anything that changes the collector, runs
+    code on its host or carries a credential. `http` sends only a GET to the device's own
+    host, so a device that acts on a GET (a reboot URL) can still be changed by one.
+  - Device probes need `device_id`, always target the device record's host and run on the
+    collector that serves the device; a `host` argument, or another `collector_id`, is
+    refused. An `http` URL must name that host and carry no user information, fragment, `;`
+    parameter or credential-named query parameter. `checkserverconnectivity` targets the
+    configured portal. Every argument value, `collector_id` and `device_id` included, is
+    checked before any call; only the URL's comparison with the device's host waits for the
+    device record.
+  - `wmi` takes one WQL SELECT with no `key=value` token; `getconfig` reads only a collection
+    method's thread pool or timeout; `debughistory` is not offered; command lines are
+    printable ASCII and capped at 2,048 characters. As a second line of defence, secrets in
+    the output, error bodies and pending statuses are masked, best effort, reading only a
+    margin past what will be shown; the masking's work grows only with the length of the
+    text. The health check is parsed from the raw reply before its result is masked, with
+    the same bounds: linear patterns, capped lists and texts, `parse_partial` when the reply
+    was cut and `parse_error` when it could not be read. The transport re-checks every line
+    against an allowlist of the 29 command heads.
+  - One wall-clock budget per call, enforced from the start of the call on the device read,
+    the POST and every poll; both read forms polled on the same session; still-running
+    replies treated as pending; and its own POST/GET rate budget.
+  - Results carry a `status`: `answered` and `no_reply` are results. `refused`, `disabled`,
+    `unsupported`, `rate_limited` and `error` come back as `Error: ...` results with the JSON
+    body on a `Details:` line, and a request refused before sending is a `REJECTED_BY_TOOL`
+    validation error, so the write audit, the client and composite callers see a failure.
+- Skill `lm-collector-debug`: an automated sequence for agents (about 15 s in all) and symptom-led
+  chains for engineers.
+
 ## [4.2.1] - 2026-10-21
 
 ### Fixed

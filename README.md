@@ -6,7 +6,7 @@
 
 <!-- mcp-name: io.github.ryanmat/logicmonitor -->
 
-Model Context Protocol (MCP) server for LogicMonitor REST API v3 integration. Enables AI assistants to interact with LogicMonitor monitoring data through 306 structured tools, 15 workflow prompts, and 26 resources. Optional integrations: IBM watsonx.ai for Granite TTM forecasting and NL summaries, Terraform IaC for any provider, and HuggingFace local Granite model fallback.
+Model Context Protocol (MCP) server for LogicMonitor REST API v3 integration. Enables AI assistants to interact with LogicMonitor monitoring data through 307 structured tools, 15 workflow prompts, and 26 resources. Optional integrations: IBM watsonx.ai for Granite TTM forecasting and NL summaries, Terraform IaC for any provider, and HuggingFace local Granite model fallback.
 
 Works with any MCP-compatible client: Claude Desktop, Claude Code, Cursor, Continue, Cline, and more.
 
@@ -137,7 +137,7 @@ Full release history, including v3.9.x and earlier, is in [CHANGELOG.md](https:/
 
 ## Features
 
-**306 Tools** across comprehensive LogicMonitor API coverage (277 LM + 18 AAP + 10 Terraform + 1 watsonx):
+**307 Tools** across comprehensive LogicMonitor API coverage (278 LM + 18 AAP + 10 Terraform + 1 watsonx):
 
 ### Core Monitoring
 - **Alert Management**: Query, acknowledge, bulk acknowledge, add notes, view rules
@@ -305,6 +305,7 @@ Pre-built slash-command workflows for Claude Code that orchestrate multiple tool
 | Capacity Planning | `/lm-capacity <device>` | Trend analysis, seasonality detection, breach forecasting, right-sizing |
 | APM Investigation | `/lm-apm [service]` | Service discovery, operation-level RED metrics, alert correlation |
 | Remediation | `/lm-remediate` | Diagnose alert, find/generate playbook, launch AAP job, verify fix |
+| Collector Debug | `/lm-collector-debug <collector \| device>` | One narrow, time-boxed collector debug check; needs write operations and the Debug permission |
 
 Skills ship with the repo — clone it and invoke `/lm-triage` in Claude Code to get started.
 
@@ -483,16 +484,16 @@ Cursor only loads the first 40 MCP tools, so the remaining ~240 are invisible to
 }
 ```
 
-`LM_MCP_CATEGORIES` composes with `LM_ENABLED_TOOLS` by intersection (it only narrows, never expands); unset, the server returns all 306 tools. In multi-portal mode the four portal tools are exempt from category filtering (they are the mode's control plane) and do not count toward your curated set. See [documentation/client-setup.md](https://github.com/ryanmat/mcp-server-logicmonitor/blob/main/documentation/client-setup.md) for a surgical `LM_ENABLED_TOOLS` example.
+`LM_MCP_CATEGORIES` composes with `LM_ENABLED_TOOLS` by intersection (it only narrows, never expands); unset, the server returns all 307 tools. In multi-portal mode the four portal tools are exempt from category filtering (they are the mode's control plane) and do not count toward your curated set. See [documentation/client-setup.md](https://github.com/ryanmat/mcp-server-logicmonitor/blob/main/documentation/client-setup.md) for a surgical `LM_ENABLED_TOOLS` example.
 
 ## Available Tools
 
-306 tools cover the full LogicMonitor surface plus the optional Ansible Automation Platform, Terraform, and IBM watsonx.ai integrations. The complete per-tool reference (every tool, its parameters, and its read/write classification) is in **[documentation/tools.md](https://github.com/ryanmat/mcp-server-logicmonitor/blob/main/documentation/tools.md)**, generated from the tool registry so it never drifts.
+307 tools cover the full LogicMonitor surface plus the optional Ansible Automation Platform, Terraform, and IBM watsonx.ai integrations. The complete per-tool reference (every tool, its parameters, and its read/write classification) is in **[documentation/tools.md](https://github.com/ryanmat/mcp-server-logicmonitor/blob/main/documentation/tools.md)**, generated from the tool registry so it never drifts.
 
 Discover tools at runtime without leaving your client:
 
 - `search_tools`: keyword search across every tool by name and description
-- the `lm://guide/tool-categories` resource: all 306 tools grouped by domain
+- the `lm://guide/tool-categories` resource: all 307 tools grouped by domain
 
 Tools are organized into these categories: Alerts, Alert Rules, Devices, Metrics, APM Traces, Dashboards, SDT, Collectors, Websites, Escalations, Device Properties, Reports, DataSources, LogicModules (Config/Event/Property/Topology/Log), Cost Optimization, Actions (Chains & Rules), Ingestion, Network & Topology, Batch Jobs, Ops & Audit, Users & Access, Services, Netscans, OIDs, Session, Correlation & Analysis, Baselines, ML/Statistical Analysis, Ansible Automation Platform, Remediation, Composite Workflows, and Error Budget.
 
@@ -536,7 +537,7 @@ The server exposes 26 resources for API reference:
 ### Guide Resources
 | URI | Description |
 |-----|-------------|
-| `lm://guide/tool-categories` | All 306 tools organized by domain category |
+| `lm://guide/tool-categories` | All 307 tools organized by domain category |
 | `lm://guide/examples` | Common filter patterns and query examples |
 | `lm://guide/mcp-orchestration` | Patterns for combining LogicMonitor with other MCP servers |
 | `lm://guide/best-practices` | Scenario-based best practices with recommendations and anti-patterns |
@@ -566,7 +567,7 @@ Pre-built workflow templates for common tasks:
 
 ## Example Usage
 
-Once configured, ask your assistant in natural language. A representative sample (the server understands far more across all 306 tools):
+Once configured, ask your assistant in natural language. A representative sample (the server understands far more across all 307 tools):
 
 - "List the first 5 devices in LogicMonitor" (quick connectivity check)
 - "Show me all critical alerts from the last hour"

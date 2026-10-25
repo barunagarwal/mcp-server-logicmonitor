@@ -6694,6 +6694,111 @@ TOOLS.extend(
             },
         ),
         Tool(
+            name="collector_debug",
+            description=(
+                "Run ONE collector debug command from a fixed list and return what the "
+                "collector said. Write-gated: each listed command is meant to read, but the call "
+                "runs it on the collector and opens a debug session that the portal records in its "
+                "Audit Log under this server's API credentials, so it needs "
+                "LM_ENABLE_WRITE_OPERATIONS=true and the collector Debug permission. Callers "
+                "pick a command and that command's typed args (any other key is refused); the "
+                "tool builds the command line and refuses anything that changes the collector, "
+                "runs code on its host or carries a credential; http sends only a GET, but a "
+                "device that acts on a GET can be changed by one. Device "
+                "probes (ping, nslookup, macaddress, snmpdiagnose, snmpget, snmpwalk, wmi, "
+                "winrm, cim, sslcerts, http) need device_id and always target the device "
+                "record's host; an http URL must name that host. checkserverconnectivity "
+                "targets the configured portal. Use after a collector has been named, to "
+                "confirm one narrow question: uptime, health_check (parsed per-method all-NaN "
+                "rates), perf, getconfig. Stops at budget_seconds. A status of answered or "
+                "no_reply is a result; refused, disabled, unsupported, rate_limited and error "
+                "come back as errors with the JSON body on a Details line, and a request "
+                "refused before sending is a validation error. Secrets in the output are "
+                "masked, best effort."
+            ),
+            annotations=_WRITE,
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "command": {
+                        "type": "string",
+                        "enum": [
+                            "adlist",
+                            "aplist",
+                            "avslist",
+                            "checkserverconnectivity",
+                            "cim",
+                            "dxlist",
+                            "firewallstatus",
+                            "getconfig",
+                            "health_check",
+                            "http",
+                            "ipaddress",
+                            "logsurf",
+                            "macaddress",
+                            "nslookup",
+                            "nsplist",
+                            "perf",
+                            "ping",
+                            "reportercache",
+                            "snmpdiagnose",
+                            "snmpget",
+                            "snmpwalk",
+                            "splist",
+                            "sslcerts",
+                            "tasklist",
+                            "tlist",
+                            "tplist",
+                            "uptime",
+                            "winrm",
+                            "wmi",
+                        ],
+                        "description": "The command to run",
+                    },
+                    "collector_id": {
+                        "type": "integer",
+                        "description": "Collector to run it on. Optional when device_id is given",
+                    },
+                    "device_id": {
+                        "type": "integer",
+                        "description": (
+                            "Device to probe; required for device probes. Its record supplies "
+                            "the host and, when collector_id is not given, the collector"
+                        ),
+                    },
+                    "args": {
+                        "type": "object",
+                        "description": (
+                            "The command's own arguments; no other key is accepted, and never "
+                            "host. perf: type (ds|queue|cpu), dsFilterColumn, ds, h. getconfig: "
+                            "key (collector.<method>.threadpool or .timeout). logsurf: level, n, "
+                            "files. aplist: h, status. splist: hostname. tplist: h, status. "
+                            "tlist: h or c (one is required). ping: type, count. snmpdiagnose: "
+                            "oids. snmpget: oids. snmpwalk: oid, timeout. wmi: query (one WQL "
+                            "SELECT; write comparisons as Name = 'x'), authType. winrm: auth, "
+                            "useSSL, certCheck, timeout. cim: class. http: url (the device's "
+                            "own host, no credentials), timeout. sslcerts: port. The other "
+                            "commands take no arguments"
+                        ),
+                    },
+                    "budget_seconds": {
+                        "type": "number",
+                        "default": 15,
+                        "description": "Wall-clock budget for the whole call, 2 to 60",
+                    },
+                    "max_output_chars": {
+                        "type": "integer",
+                        "default": 20000,
+                        "description": (
+                            "Cap on raw output returned (health_check returns a parsed "
+                            "summary and at most 4,000 raw characters)"
+                        ),
+                    },
+                },
+                "required": ["command"],
+            },
+        ),
+        Tool(
             name="get_power_events",
             description=(
                 "Filter alerts for UPS/PDU power-event signatures across APC, Liebert, "
@@ -7504,6 +7609,7 @@ def get_tool_handler(tool_name: str) -> Any:
         audit,
         baselines,
         batchjobs,
+        collector_debug,
         collectors,
         configsources,
         correlation,
@@ -7596,6 +7702,7 @@ def get_tool_handler(tool_name: str) -> Any:
         "update_collector_group": collectors.update_collector_group,
         "delete_collector_group": collectors.delete_collector_group,
         "get_collector_health": collectors.get_collector_health,
+        "collector_debug": collector_debug.collector_debug,
         # Network Intelligence (v3.8.0)
         "get_interface_metrics": networking.get_interface_metrics,
         "get_top_talkers": networking.get_top_talkers,

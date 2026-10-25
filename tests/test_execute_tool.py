@@ -423,6 +423,63 @@ class TestWriteOutcomeFromResult:
         ]
 
     @respx.mock
+    async def test_collector_debug_refusal_audits_failure(self, write_portal, caplog):
+        """A collector_debug request the tool refuses is a failed write, before any call."""
+        from lm_mcp.server import execute_tool
+
+        with caplog.at_level(logging.INFO, logger="lm_mcp.audit"):
+            result = await execute_tool(
+                "collector_debug",
+                {"command": "ping", "device_id": 7, "args": {"host": "169.254.169.254"}},
+            )
+
+        assert isinstance(result[0], ErrorContent)
+        assert not respx.calls
+        lines = _audit_lines(caplog)
+        assert [level for level, _ in lines] == [logging.WARNING]
+        assert lines[0][1].startswith("Write operation failed: collector_debug")
+
+    @respx.mock
+    async def test_collector_debug_portal_refusal_audits_failure(self, write_portal, caplog):
+        """A debug POST the portal refuses keeps its JSON body but is audited as a failure."""
+        respx.post("https://test.logicmonitor.com/santaba/rest/debug").mock(
+            return_value=httpx.Response(403, json=FORBIDDEN)
+        )
+        from lm_mcp.server import execute_tool
+
+        with caplog.at_level(logging.INFO, logger="lm_mcp.audit"):
+            result = await execute_tool("collector_debug", {"command": "uptime", "collector_id": 9})
+
+        assert isinstance(result[0], ErrorContent)
+        assert result[0].text.startswith("Error: uptime: refused: ")
+        assert json.loads(result[0].text.split("\nDetails: ", 1)[1])["status"] == "refused"
+        lines = _audit_lines(caplog)
+        assert [level for level, _ in lines] == [logging.WARNING]
+        assert lines[0][1].startswith("Write operation failed: collector_debug")
+
+    @respx.mock
+    async def test_collector_debug_answer_audits_success(self, write_portal, caplog, monkeypatch):
+        from lm_mcp.tools import collector_debug as cd
+
+        monkeypatch.setattr(cd, "POLL_SECONDS", 0.01)
+        respx.post("https://test.logicmonitor.com/santaba/rest/debug").mock(
+            return_value=httpx.Response(200, json={"sessionId": "s1"})
+        )
+        respx.get("https://test.logicmonitor.com/santaba/rest/debug/s1").mock(
+            return_value=httpx.Response(200, json={"output": "uptime=1h"})
+        )
+        from lm_mcp.server import execute_tool
+
+        with caplog.at_level(logging.INFO, logger="lm_mcp.audit"):
+            result = await execute_tool("collector_debug", {"command": "uptime", "collector_id": 9})
+
+        assert not is_error_result(result)
+        assert json.loads(result[0].text)["status"] == "answered"
+        lines = _audit_lines(caplog)
+        assert [level for level, _ in lines] == [logging.INFO]
+        assert lines[0][1].startswith("Write operation: collector_debug")
+
+    @respx.mock
     async def test_successful_delete_audits_success(self, write_portal, caplog):
         respx.get(DEVICE_URL).mock(return_value=httpx.Response(200, json=DEVICE_7))
         respx.delete(DEVICE_URL).mock(return_value=httpx.Response(200, json={}))

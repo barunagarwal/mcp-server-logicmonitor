@@ -204,6 +204,7 @@ WRITE_TOOL_PREFIXES = (
     "terraform_write",
     "use_portal",
     "reload_portals",
+    "collector_debug",
 )
 
 
