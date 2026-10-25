@@ -420,6 +420,13 @@ TOOL_CATEGORIES = {
                 "compare_to_baseline",
             ],
         },
+        "usage": {
+            "description": "Contracted entitlements and metered consumption",
+            "tools": [
+                "get_usage_contract",
+                "get_usage_metrics",
+            ],
+        },
         "portals": {
             "description": "Multi-portal switching: one server, many customer portals",
             "tools": [

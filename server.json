@@ -1,7 +1,7 @@
 {
   "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
   "name": "io.github.ryanmat/logicmonitor",
-  "description": "LogicMonitor API integration with 306 tools for alerts, devices, dashboards, traces, OTLP metrics, network intelligence, Ansible Automation Platform, IBM watsonx.ai, and more.",
+  "description": "LogicMonitor API integration with 308 tools for alerts, devices, dashboards, traces, OTLP metrics, network intelligence, Ansible Automation Platform, IBM watsonx.ai, and more.",
   "repository": {
     "url": "https://github.com/ryanmat/mcp-server-logicmonitor",
     "source": "github"

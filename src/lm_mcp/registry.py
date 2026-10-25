@@ -3432,6 +3432,40 @@ TOOLS.extend(
     ]
 )
 
+# Usage
+TOOLS.extend(
+    [
+        Tool(
+            name="get_usage_contract",
+            description=(
+                "Get contracted entitlements from /usage/contractInfo. Returns every "
+                "feature including ones with no entitlement (LITE_RESOURCES, SAAS, "
+                "DYNAMIC_SERVICE_INSIGHTS), which the usage page hides"
+            ),
+            annotations=_READ_ONLY,
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "billable_only": {
+                        "type": "boolean",
+                        "default": False,
+                        "description": "Return only metered, paid, non-zero lines",
+                    },
+                },
+            },
+        ),
+        Tool(
+            name="get_usage_metrics",
+            description=(
+                "Get portal-wide instantaneous usage counts from /metrics/usage. "
+                "A point-in-time count, not a billing figure"
+            ),
+            annotations=_READ_ONLY,
+            inputSchema={"type": "object", "properties": {}},
+        ),
+    ]
+)
+
 # Cost/Cloud
 TOOLS.extend(
     [
@@ -7542,6 +7576,7 @@ def get_tool_handler(tool_name: str) -> Any:
         topology_analysis,
         topologysources,
         traces,
+        usage,
         users,
         watsonx,
         websites,
@@ -7795,6 +7830,9 @@ def get_tool_handler(tool_name: str) -> Any:
         "get_batchjob": batchjobs.get_batchjob,
         "get_device_batchjobs": batchjobs.get_device_batchjobs,
         "get_scheduled_downtime_jobs": batchjobs.get_scheduled_downtime_jobs,
+        # Usage
+        "get_usage_contract": usage.get_usage_contract,
+        "get_usage_metrics": usage.get_usage_metrics,
         # Cost
         "get_cost_recommendations": cost.get_cost_recommendations,
         "get_idle_resources": cost.get_idle_resources,

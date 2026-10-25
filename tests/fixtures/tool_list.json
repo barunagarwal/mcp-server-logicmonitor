@@ -6885,6 +6885,40 @@
       "type": "object"
     }
   },
+  "get_usage_contract": {
+    "annotations": {
+      "destructiveHint": false,
+      "idempotentHint": true,
+      "openWorldHint": true,
+      "readOnlyHint": true,
+      "title": null
+    },
+    "description": "Get contracted entitlements from /usage/contractInfo. Returns every feature including ones with no entitlement (LITE_RESOURCES, SAAS, DYNAMIC_SERVICE_INSIGHTS), which the usage page hides",
+    "inputSchema": {
+      "properties": {
+        "billable_only": {
+          "default": false,
+          "description": "Return only metered, paid, non-zero lines",
+          "type": "boolean"
+        }
+      },
+      "type": "object"
+    }
+  },
+  "get_usage_metrics": {
+    "annotations": {
+      "destructiveHint": false,
+      "idempotentHint": true,
+      "openWorldHint": true,
+      "readOnlyHint": true,
+      "title": null
+    },
+    "description": "Get portal-wide instantaneous usage counts from /metrics/usage. A point-in-time count, not a billing figure",
+    "inputSchema": {
+      "properties": {},
+      "type": "object"
+    }
+  },
   "get_user": {
     "annotations": {
       "destructiveHint": false,

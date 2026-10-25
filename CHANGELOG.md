@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Usage tools, read-only, in a new `usage` tool category:
+  - `get_usage_contract`: contracted entitlements from `/usage/contractInfo`, including
+    the features with no entitlement that the usage page hides. Each feature keeps its
+    role, unit and roll-up basis. Quantities in more than one unit are paired with their
+    units and flagged `entitled_ambiguous` when more than one carries a quantity. A
+    child whose quantity equals its metered parent's is marked `repeats_parent`, a
+    restated pool, and left out of the billable lines. A node it cannot read is logged
+    and listed under `unreadable_nodes`, without failing the call. A response with no
+    feature it can read carries a `warnings` entry saying so, rather than reading as an
+    empty contract.
+  - `get_usage_metrics`: point-in-time counts from `/metrics/usage`, labelled as not
+    billing figures. An empty or non-object response carries a `warnings` entry.
+  - A 404 from either endpoint names the path instead of suggesting a missing ID.
+
 ## [4.2.1] - 2026-10-21
 
 ### Fixed

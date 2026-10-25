@@ -2,7 +2,7 @@
 
 <!-- GENERATED FILE. Do not edit by hand. Regenerate: uv run python tests/test_tools_doc.py -->
 
-Reference for all 306 tools the LogicMonitor MCP server can advertise (core plus the optional Ansible Automation Platform, Terraform, and IBM watsonx.ai integrations). The **Write** column shows whether a tool requires `LM_ENABLE_WRITE_OPERATIONS=true`.
+Reference for all 308 tools the LogicMonitor MCP server can advertise (core plus the optional Ansible Automation Platform, Terraform, and IBM watsonx.ai integrations). The **Write** column shows whether a tool requires `LM_ENABLE_WRITE_OPERATIONS=true`.
 
 This file is generated from the tool registry (`src/lm_mcp/registry.py`) and the domain index (`lm://guide/tool-categories`), and kept in sync by `tests/test_tools_doc.py`. At runtime, discover tools with the `search_tools` tool.
 
@@ -471,6 +471,15 @@ Session context, variable management, and baselines
 | `list_session_history` | List recent tool call history | No |
 | `save_baseline` | Save a metric baseline from historical data. Computes mean, min, max, stddev per datapoint and stores as a session variable for later comparison. | No |
 | `compare_to_baseline` | Compare current metrics against a stored baseline. Reports deviation percentage and status (normal, elevated, reduced, anomalous) per datapoint. | No |
+
+## Usage
+
+Contracted entitlements and metered consumption
+
+| Tool | Description | Write |
+|------|-------------|-------|
+| `get_usage_contract` | Get contracted entitlements from /usage/contractInfo. Returns every feature including ones with no entitlement (LITE_RESOURCES, SAAS, DYNAMIC_SERVICE_INSIGHTS), which the usage page hides | No |
+| `get_usage_metrics` | Get portal-wide instantaneous usage counts from /metrics/usage. A point-in-time count, not a billing figure | No |
 
 ## Portals
 
